@@ -97,9 +97,69 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         description: String,
         qualityResult: QualityGateResult
     ): GitOperationResult {
-        // TODO: Implement actual PR creation using GitHub CLI
-        // For now, return success to simulate PR creation
-        return GitOperationResult(success = true)
+        if (title.isBlank()) {
+            return GitOperationResult(success = false, errorMessage = "PR title cannot be empty")
+        }
+
+        // Build PR description with quality gate summary
+        val qualityGateSummary = buildQualityGateSummary(qualityResult)
+        val fullDescription = """
+            $description
+            
+            ---
+            
+            ## Quality Gate Summary
+            
+            $qualityGateSummary
+        """.trimIndent()
+
+        return try {
+            // Check if gh CLI is installed
+            val checkProcess = ProcessBuilder("gh", "--version")
+                .directory(projectDir)
+                .start()
+            checkProcess.waitFor()
+            
+            if (checkProcess.exitValue() != 0) {
+                return GitOperationResult(success = false, errorMessage = "GitHub CLI (gh) is not installed")
+            }
+
+            // Create PR using gh CLI
+            val process = ProcessBuilder(
+                "gh", "pr", "create",
+                "--title", title,
+                "--body", fullDescription,
+                "--base", "main"
+            ).directory(projectDir).start()
+            
+            val exitCode = process.waitFor()
+            
+            if (exitCode == 0) {
+                GitOperationResult(success = true)
+            } else {
+                val errorOutput = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
+                val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
+                
+                // Check for authentication error
+                if (errorOutput.contains("authentication") || output.contains("authentication")) {
+                    GitOperationResult(success = false, errorMessage = "GitHub CLI authentication failed. Run 'gh auth login'")
+                } else {
+                    GitOperationResult(success = false, errorMessage = "Failed to create PR: $errorOutput")
+                }
+            }
+        } catch (e: Exception) {
+            GitOperationResult(success = false, errorMessage = "Failed to create PR: ${e.message}")
+        }
+    }
+
+    private fun buildQualityGateSummary(qualityResult: QualityGateResult): String {
+        return """
+            |**Build Status:** ${if (qualityResult.buildSuccess) "✅ Passed" else "❌ Failed"}
+            |**Coverage:** ${"%.2f".format(qualityResult.coveragePercentage)}%
+            |**Quality Gate:** ${if (qualityResult.passed) "✅ Passed" else "❌ Failed"}
+            |
+            |${qualityResult.errorMessage?.let { "**Error:** $it" } ?: ""}
+        """.trimMargin()
     }
 
     private fun isValidBranchName(branchName: String): Boolean {
