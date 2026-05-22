@@ -5,10 +5,17 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 
+enum class CoverageType {
+    LINE,
+    BRANCH,
+    INSTRUCTION
+}
+
 class QualityGateValidator(
     private val projectDir: File,
     private val coverageThreshold: Double = 100.0,
-    private val timeoutSeconds: Long = 900L // 15 minutes default
+    private val timeoutSeconds: Long = 900L, // 15 minutes default
+    private val coverageType: CoverageType = CoverageType.LINE
 ) {
 
     fun validate(): QualityGateResult {
@@ -91,9 +98,78 @@ class QualityGateValidator(
     }
     
     private fun parseCoverageReport(): Double {
-        // TODO: Implement actual coverage report parsing in task 1.2
-        // For now, return a placeholder value
+        // Try Kover first
+        val koverReport = File(projectDir, "build/reports/kover/xml/report.xml")
+        if (koverReport.exists()) {
+            return parseKoverReport(koverReport)
+        }
+        
+        // Try JaCoCo
+        val jacocoReport = File(projectDir, "build/reports/jacoco/test/jacocoTestReport.xml")
+        if (jacocoReport.exists()) {
+            return parseJaCoCoReport(jacocoReport)
+        }
+        
+        // No coverage report found
         return 0.0
+    }
+    
+    private fun parseKoverReport(reportFile: File): Double {
+        return try {
+            val content = reportFile.readText()
+            val typeAttribute = when (coverageType) {
+                CoverageType.LINE -> "LINE"
+                CoverageType.BRANCH -> "BRANCH"
+                CoverageType.INSTRUCTION -> "INSTRUCTION"
+            }
+            
+            val regex = Regex("""<counter type="$typeAttribute" missed="(\d+)" covered="(\d+)"/>""")
+            val match = regex.find(content)
+            
+            if (match != null) {
+                val missed = match.groupValues[1].toDouble()
+                val covered = match.groupValues[2].toDouble()
+                val total = missed + covered
+                if (total > 0) {
+                    (covered / total) * 100.0
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } catch (e: Exception) {
+            0.0
+        }
+    }
+    
+    private fun parseJaCoCoReport(reportFile: File): Double {
+        return try {
+            val content = reportFile.readText()
+            val typeAttribute = when (coverageType) {
+                CoverageType.LINE -> "LINE"
+                CoverageType.BRANCH -> "BRANCH"
+                CoverageType.INSTRUCTION -> "INSTRUCTION"
+            }
+            
+            val regex = Regex("""<counter type="$typeAttribute" missed="(\d+)" covered="(\d+)"/>""")
+            val match = regex.find(content)
+            
+            if (match != null) {
+                val missed = match.groupValues[1].toDouble()
+                val covered = match.groupValues[2].toDouble()
+                val total = missed + covered
+                if (total > 0) {
+                    (covered / total) * 100.0
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } catch (e: Exception) {
+            0.0
+        }
     }
     
     private data class BuildResult(
