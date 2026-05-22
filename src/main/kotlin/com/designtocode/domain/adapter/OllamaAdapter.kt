@@ -5,7 +5,7 @@ import com.designtocode.domain.port.GenerationResult
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.URL
+import java.net.URI
 
 class OllamaAdapter(
     private val host: String,
@@ -32,9 +32,8 @@ class OllamaAdapter(
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun callOllamaAPI(prompt: String): OllamaResponse {
-        val url = URL("http://$host:$port/api/generate")
+        val url = URI.create("http://$host:$port/api/generate").toURL()
         val connection = url.openConnection() as HttpURLConnection
         
         return try {
@@ -71,12 +70,48 @@ class OllamaAdapter(
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
     private fun parseGeneratedFiles(content: String, workspace: File): List<String> {
-        // In a real implementation, this would parse the AI response to extract file paths
-        // For now, return a placeholder list
-        // TODO: Implement proper parsing of AI-generated file content
-        return emptyList()
+        val generatedFiles = mutableListOf<String>()
+        
+        try {
+            // Parse AI response for markdown code blocks with file paths
+            // Expected format: ```kotlin:path/to/file.kt
+            val codeBlockRegex = Regex("""```(\w+):([^\n]+)\n([\s\S]*?)```""")
+            val matches = codeBlockRegex.findAll(content)
+            
+            for (match in matches) {
+                val filePath = match.groupValues[2]
+                val fileContent = match.groupValues[3]
+                
+                // Validate file path is within workspace
+                if (isPathSafe(filePath, workspace)) {
+                    val file = File(workspace, filePath)
+                    file.parentFile?.mkdirs()
+                    file.writeText(fileContent)
+                    generatedFiles.add(filePath)
+                }
+            }
+        } catch (e: Exception) {
+            // Handle malformed responses gracefully
+            // Log error but don't fail the entire operation
+        }
+        
+        return generatedFiles
+    }
+
+    private fun isPathSafe(filePath: String, workspace: File): Boolean {
+        return try {
+            val file = File(workspace, filePath)
+            val canonicalWorkspace = workspace.canonicalPath
+            val canonicalFile = file.canonicalPath
+            
+            // Check if the file is within the workspace
+            canonicalFile.startsWith(canonicalWorkspace) && 
+            !filePath.contains("..") && 
+            !filePath.startsWith("/")
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private data class OllamaResponse(
