@@ -40,6 +40,8 @@ class OllamaAdapter(
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
+            connection.connectTimeout = 5000 // 5 seconds connection timeout
+            connection.readTimeout = 5000 // 5 seconds read timeout
             
             val requestBody = """
                 {
@@ -74,6 +76,49 @@ class OllamaAdapter(
         val generatedFiles = mutableListOf<String>()
         
         try {
+            // Parse file deletion markers
+            // Expected format: DELETE:path/to/file.kt
+            val deleteRegex = Regex("""DELETE:([^\n]+)""")
+            deleteRegex.findAll(content).forEach { match ->
+                val filePath = match.groupValues[1]
+                if (isPathSafe(filePath, workspace)) {
+                    val file = File(workspace, filePath)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                }
+            }
+            
+            // Parse file modification markers
+            // Expected format: MODIFY:path/to/file.kt[:line-range]
+            val modifyRegex = Regex("""MODIFY:([^\n:]+)(?::(\d+-\d+))?""")
+            modifyRegex.findAll(content).forEach { match ->
+                val filePath = match.groupValues[1]
+                val lineRange = match.groupValues[2]
+                
+                if (isPathSafe(filePath, workspace)) {
+                    val file = File(workspace, filePath)
+                    if (file.exists()) {
+                        // Find the code block after the MODIFY marker
+                        val codeBlockRegex = Regex("""MODIFY:$filePath(?::${lineRange})?\n```(\w+)\n([\s\S]*?)```""")
+                        val codeMatch = codeBlockRegex.find(content)
+                        
+                        if (codeMatch != null) {
+                            val newContent = codeMatch.groupValues[2]
+                            
+                            if (lineRange.isNotEmpty()) {
+                                // Modify specific lines
+                                modifyFileLines(file, lineRange, newContent)
+                            } else {
+                                // Replace entire file
+                                file.writeText(newContent)
+                            }
+                            generatedFiles.add(filePath)
+                        }
+                    }
+                }
+            }
+            
             // Parse AI response for markdown code blocks with file paths
             // Expected format: ```kotlin:path/to/file.kt
             val codeBlockRegex = Regex("""```(\w+):([^\n]+)\n([\s\S]*?)```""")
@@ -97,6 +142,28 @@ class OllamaAdapter(
         }
         
         return generatedFiles
+    }
+    
+    private fun modifyFileLines(file: File, lineRange: String, newContent: String) {
+        try {
+            val lines = file.readLines()
+            val rangeParts = lineRange.split("-")
+            val startLine = rangeParts[0].toInt() - 1 // Convert to 0-indexed
+            val endLine = rangeParts[1].toInt() - 1
+            
+            if (startLine >= 0 && endLine < lines.size && startLine <= endLine) {
+                val newLines = newContent.lines()
+                val updatedLines = lines.toMutableList()
+                
+                // Replace the specified line range
+                updatedLines.subList(startLine, endLine + 1).clear()
+                updatedLines.addAll(startLine, newLines)
+                
+                file.writeText(updatedLines.joinToString("\n"))
+            }
+        } catch (e: Exception) {
+            // Handle modification errors gracefully
+        }
     }
 
     private fun isPathSafe(filePath: String, workspace: File): Boolean {

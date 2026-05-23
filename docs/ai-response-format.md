@@ -65,6 +65,44 @@ class UserController {
 }
 ```
 
+## File Deletion Markers
+
+To delete a file, use the `DELETE` marker before the file path:
+
+```
+DELETE:src/main/kotlin/com/example/OldController.kt
+```
+
+This will remove the specified file from the workspace if it exists.
+
+## File Modification Instructions
+
+To modify an existing file, use the `MODIFY` marker with optional line range:
+
+```
+MODIFY:src/main/kotlin/com/example/UserController.kt:10-20
+```kotlin
+// New content for lines 10-20
+fun newMethod() {
+    // implementation
+}
+```
+```
+
+If no line range is specified, the entire file will be replaced:
+
+```
+MODIFY:src/main/kotlin/com/example/UserController.kt
+```kotlin
+// Entire new file content
+package com.example
+
+@RestController
+class UserController {
+    // new implementation
+}
+```
+
 ## Model Configuration
 
 ### Current Model
