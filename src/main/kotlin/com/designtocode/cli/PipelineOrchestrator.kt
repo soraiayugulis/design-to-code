@@ -1,6 +1,8 @@
 package com.designtocode.cli
 
+import com.designtocode.config.PipelineConfig
 import com.designtocode.domain.ContextBuilder
+import com.designtocode.domain.CoverageType
 import com.designtocode.domain.PromptConstructor
 import com.designtocode.domain.QualityGateValidator
 import com.designtocode.domain.adapter.GitHubCliAdapter
@@ -12,7 +14,8 @@ import kotlinx.coroutines.runBlocking
 class PipelineOrchestrator(
     private val workspacePath: String,
     private val changedFiles: List<String>,
-    private val ollamaModel: String
+    private val ollamaModel: String,
+    private val config: PipelineConfig
 ) {
 
     fun execute(): PipelineResult = runBlocking {
@@ -34,7 +37,12 @@ class PipelineOrchestrator(
         
         // Stage 3: AI Generation
         println("[Stage 3] AI Generation")
-        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = ollamaModel)
+        val ollamaAdapter = OllamaAdapter(
+            host = config.ai.host,
+            port = config.ai.port,
+            model = ollamaModel,
+            timeoutMs = config.ai.timeoutMs
+        )
         val aiResult = ollamaAdapter.generate(prompt, File(workspacePath))
         if (!aiResult.success) {
             println("AI generation failed: ${aiResult.errorMessage}")
@@ -44,7 +52,17 @@ class PipelineOrchestrator(
         
         // Stage 4: Quality Gate Validation
         println("[Stage 4] Quality Gate Validation")
-        val qualityValidator = QualityGateValidator(File(workspacePath))
+        val coverageType = when (config.qualityGate.coverageType.uppercase()) {
+            "BRANCH" -> CoverageType.BRANCH
+            "INSTRUCTION" -> CoverageType.INSTRUCTION
+            else -> CoverageType.LINE
+        }
+        val qualityValidator = QualityGateValidator(
+            projectDir = File(workspacePath),
+            coverageThreshold = config.qualityGate.coverageThreshold,
+            timeoutSeconds = config.qualityGate.timeoutSeconds,
+            coverageType = coverageType
+        )
         val qualityResult = qualityValidator.validate()
         if (!qualityResult.passed) {
             println("Quality gate failed: ${qualityResult.errorMessage}")
@@ -55,7 +73,7 @@ class PipelineOrchestrator(
         // Stage 5: Git Operations
         println("[Stage 5] Git Operations & PR Creation")
         val gitOperations: GitOperationsPort = GitHubCliAdapter(File(workspacePath))
-        val branchName = "feature/ai-gen-${System.currentTimeMillis()}"
+        val branchName = "${config.git.branchPrefix}-${System.currentTimeMillis()}"
         gitOperations.createFeatureBranch(branchName)
         gitOperations.commitChanges("feat: AI-generated code changes")
         val prResult = gitOperations.createPullRequest(
