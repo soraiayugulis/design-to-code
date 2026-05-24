@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm") version "1.9.21"
     kotlin("plugin.spring") version "1.9.21"
     application
+    id("io.gitlab.arturbosch.detekt") version "1.23.4"
 }
 
 group = "com.designtocode"
@@ -52,4 +53,10 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 
 application {
     mainClass.set("com.designtocode.cli.MainKt")
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom("$projectDir/config/detekt/detekt.yml")
 }
