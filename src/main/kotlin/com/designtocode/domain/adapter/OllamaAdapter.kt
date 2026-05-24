@@ -3,6 +3,7 @@ package com.designtocode.domain.adapter
 import com.designtocode.domain.port.AIAgentPort
 import com.designtocode.domain.port.GenerationResult
 import kotlinx.coroutines.withTimeout
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -13,21 +14,33 @@ class OllamaAdapter(
     private val model: String,
     private val timeoutMs: Long = 300000L
 ) : AIAgentPort {
+    private val logger = LoggerFactory.getLogger(OllamaAdapter::class.java)
 
     override suspend fun generate(prompt: String, workspace: File): GenerationResult {
+        logger.info("Starting AI generation with Ollama")
+        logger.info("Ollama configuration: host=$host, port=$port, model=$model, timeout=${timeoutMs}ms")
+        logger.debug("Workspace: ${workspace.absolutePath}")
+        logger.debug("Prompt length: ${prompt.length} characters")
+        
         return try {
             withTimeout(timeoutMs) {
                 val response = callOllamaAPI(prompt)
                 if (response.success) {
+                    logger.info("Ollama API call succeeded")
+                    logger.debug("Response content length: ${response.content?.length ?: 0} characters")
                     val generatedFiles = parseGeneratedFiles(response.content ?: "", workspace)
+                    logger.info("Generated ${generatedFiles.size} files")
                     GenerationResult(success = true, generatedFiles = generatedFiles)
                 } else {
+                    logger.error("Ollama API call failed: ${response.error}")
                     GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = response.error ?: "Unknown error")
                 }
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            logger.error("AI generation timeout after ${timeoutMs}ms")
             GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "AI generation timeout after ${timeoutMs}ms")
         } catch (e: Exception) {
+            logger.error("Ollama connection error: ${e.message}", e)
             GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "Ollama connection error: ${e.message}")
         }
     }

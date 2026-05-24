@@ -35,7 +35,7 @@ complexity:
   ComplexInterface:
     active: true
     threshold: 3
-  ComplexMethod:
+  CyclomaticComplexMethod:
     active: true
     threshold: 15
   LabeledExpression:
@@ -90,9 +90,6 @@ exceptions:
     active: true
   TooGenericExceptionThrown:
     active: true
-
-formatting:
-  active: false
 
 naming:
   active: true
@@ -166,15 +163,11 @@ potential-bugs:
     active: true
   IteratorNotThrowingNoSuchElementException:
     active: true
-  IteratorToSequenceIterator:
-    active: false
   LateinitUsage:
     active: true
   MapGetWithNotNullAssertionOperator:
     active: true
   NullableToStringCall:
-    active: true
-  RedundantElseInWhen:
     active: true
   UnconditionalJumpStatementInLoop:
     active: false
@@ -190,8 +183,6 @@ potential-bugs:
     active: true
   UselessPostfixExpression:
     active: true
-  WrongEqualsType:
-    active: true
 
 style:
   active: true
@@ -200,8 +191,6 @@ style:
   CollapsibleIfStatements:
     active: true
   DataClassContainsFunctions:
-    active: false
-  DataClassNonPublicData:
     active: false
   EqualsNullCall:
     active: true
@@ -213,40 +202,15 @@ style:
     active: true
   ExpressionBodySyntax:
     active: true
-  ForbiddenComment:
-    active: true
-    values:
-      - 'TODO:'
-      - 'FIXME:'
-      - 'STOPSHIP:'
   ForbiddenImport:
     active: false
   ForbiddenMethodCall:
     active: false
-  ForbiddenPublicDataClass:
-    active: false
-  LibraryCodeMustSpecifyReturnType:
-    active: true
-  LibraryEntitiesShouldNotBePublic:
-    active: false
   LoopWithTooManyJumpStatements:
     active: true
-  MagicNumber:
-    active: true
-    ignores:
-      - '2'
-      - '3'
-      - '4'
-      - '5'
-  MandatoryBracesIfStatements:
-    active: false
-  MandatoryBracesLoops:
-    active: false
   MaxLineLength:
     active: true
     maxLineLength: 120
-  ModifierOrdering:
-    active: true
   MultilineLambdaItParameter:
     active: false
   NestedClassesVisibility:
