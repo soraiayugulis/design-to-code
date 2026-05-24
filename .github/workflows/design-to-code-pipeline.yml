@@ -1,34 +1,90 @@
 name: Design-to-Code AI Pipeline
 
 on:
+  pull_request:
+    branches:
+      - 'feature-ai/**'
   workflow_dispatch:
     inputs:
       changed_files:
-        description: 'Comma-separated list of changed spec files'
-        required: true
+        description: 'Comma-separated list of changed spec files (optional for auto-trigger)'
+        required: false
         type: string
       workspace_path:
-        description: 'Path to the project workspace'
-        required: true
+        description: 'Path to the project workspace (optional, defaults to repository root)'
+        required: false
         type: string
+        default: '.'
       ollama_model:
         description: 'Ollama model to use for code generation'
-        required: true
+        required: false
         type: string
         default: 'codellama:13b'
 
 jobs:
   design-to-code:
     runs-on: ubuntu-latest
-    container:
-      image: design-to-code:latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Extract changed spec files
+        id: changed-files
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ inputs.changed_files }}" ]; then
+            echo "Using manually provided changed files: ${{ inputs.changed_files }}"
+            echo "changed_files=${{ inputs.changed_files }}" >> $GITHUB_OUTPUT
+          else
+            # Extract changed files from git diff
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            else
+              BASE_SHA="HEAD~1"
+            fi
+            
+            # Find changed spec files (.yaml, .yml, .md in design/ directory)
+            CHANGED_FILES=$(git diff --name-only $BASE_SHA HEAD | grep -E 'design/.*\.(yaml|yml|md)$' || true)
+            
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "No spec files changed in this commit"
+              echo "changed_files=" >> $GITHUB_OUTPUT
+            else
+              # Convert to comma-separated list
+              CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr '\n' ',' | sed 's/,$//')
+              echo "Changed spec files: $CHANGED_FILES_CSV"
+              echo "changed_files=$CHANGED_FILES_CSV" >> $GITHUB_OUTPUT
+            fi
+          fi
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      
+      - name: Build project
+        run: |
+          ./gradlew build -x test
       
       - name: Run Design-to-Code Pipeline
+        if: steps.changed-files.outputs.changed_files != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          java -jar /app/design-to-code.jar \
-            "${{ inputs.changed_files }}" \
-            "${{ inputs.workspace_path }}" \
-            "${{ inputs.ollama_model }}"
+          WORKSPACE_PATH="${{ inputs.workspace_path || '.' }}"
+          CHANGED_FILES="${{ steps.changed-files.outputs.changed_files }}"
+          OLLAMA_MODEL="${{ inputs.ollama_model || 'codellama:13b' }}"
+          
+          echo "Running pipeline with:"
+          echo "  Workspace: $WORKSPACE_PATH"
+          echo "  Changed files: $CHANGED_FILES"
+          echo "  Ollama model: $OLLAMA_MODEL"
+          
+          ./gradlew run --args="$CHANGED_FILES $WORKSPACE_PATH $OLLAMA_MODEL"
+      
+      - name: Skip pipeline
+        if: steps.changed-files.outputs.changed_files == ''
+        run: |
+          echo "No spec files changed, skipping pipeline execution"
