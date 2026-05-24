@@ -159,6 +159,7 @@ class EnvironmentValidator {
     private fun extractGitVersion(output: String?): String {
         if (output == null) return "unknown"
         val parts = output.split(" ")
-        return if (parts.size >= 3) parts[2] else "unknown"
+        val expectedParts = 3
+        return if (parts.size >= expectedParts) parts[2] else "unknown"
     }
 }

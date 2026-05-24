@@ -9,7 +9,9 @@ import com.designtocode.domain.adapter.GitHubCliAdapter
 import com.designtocode.domain.adapter.OllamaAdapter
 import com.designtocode.domain.port.GitOperationsPort
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 
 class PipelineOrchestrator(
@@ -21,12 +23,18 @@ class PipelineOrchestrator(
     private val logger = LoggerFactory.getLogger(PipelineOrchestrator::class.java)
 
     fun execute(): PipelineResult = runBlocking {
-        logger.info("=== Design-to-Code AI Pipeline Started ===")
-        logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
-        logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
-        logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}")
-        logger.info("Workspace: $workspacePath")
-        logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
+        val requestId = UUID.randomUUID().toString()
+        MDC.put("requestId", requestId)
+        MDC.put("workspace", workspacePath)
+        MDC.put("model", ollamaModel)
+        
+        try {
+            logger.info("=== Design-to-Code AI Pipeline Started ===")
+            logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
+            logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
+            logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}")
+            logger.info("Workspace: $workspacePath")
+            logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
         
         // Stage 1: Context Analysis
         logger.info("[Stage 1] Context Analysis & Detection")
@@ -88,7 +96,12 @@ class PipelineOrchestrator(
         
         if (!qualityResult.passed) {
             logger.error("Quality gate failed: ${qualityResult.errorMessage}")
-            logger.error("Quality gate details - passed=${qualityResult.passed}, buildSuccess=${qualityResult.buildSuccess}, coverage=${qualityResult.coveragePercentage}%, lintIssues=${qualityResult.lintIssues}")
+            logger.error(
+                "Quality gate details - passed=${qualityResult.passed}, " +
+                    "buildSuccess=${qualityResult.buildSuccess}, " +
+                    "coverage=${qualityResult.coveragePercentage}%, " +
+                    "lintIssues=${qualityResult.lintIssues}"
+            )
             return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
         }
         logger.info("Quality gate passed: ${qualityResult.coveragePercentage}% coverage, ${qualityResult.lintIssues} lint issues")
@@ -131,6 +144,9 @@ class PipelineOrchestrator(
         logger.info("=== Pipeline Completed Successfully ===")
         logger.info("Final result: success=true, coverage=${qualityResult.coveragePercentage}%, lintIssues=${qualityResult.lintIssues}")
         return@runBlocking PipelineResult(success = true)
+        } finally {
+            MDC.clear()
+        }
     }
 }
 

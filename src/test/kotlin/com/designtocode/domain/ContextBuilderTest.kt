@@ -1,12 +1,8 @@
 package com.designtocode.domain
 
-import com.designtocode.domain.model.DatabaseType
-import com.designtocode.domain.model.ProjectContext
-import com.designtocode.domain.model.TechStack
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import kotlin.test.assertEquals
 
 class ContextBuilderTest {
 

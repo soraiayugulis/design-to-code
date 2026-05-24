@@ -24,6 +24,10 @@ data class OllamaApiResult(
 )
 
 class OllamaValidator(private val host: String = "localhost", private val port: Int = 11434) {
+    companion object {
+        private const val CONNECTION_TIMEOUT_MS = 5000
+        private const val READ_TIMEOUT_MS = 5000
+    }
 
     private val baseUrl = "http://$host:$port"
 
@@ -32,8 +36,8 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             val url = URI.create("$baseUrl/api/tags").toURL()
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = CONNECTION_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
             val isAvailable = responseCode == 200
@@ -49,7 +53,11 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             OllamaServiceResult(
                 isAvailable = isAvailable,
                 version = version,
-                message = if (isAvailable) "Ollama service is running" else "Ollama service is not available (HTTP $responseCode)"
+                message = if (isAvailable) {
+                    "Ollama service is running"
+                } else {
+                    "Ollama service is not available (HTTP $responseCode)"
+                }
             )
         } catch (e: Exception) {
             OllamaServiceResult(
@@ -65,8 +73,8 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             val url = URI.create("$baseUrl/api/tags").toURL()
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = CONNECTION_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
             if (responseCode != 200) {
@@ -103,8 +111,8 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             val url = URI.create("$baseUrl/api/tags").toURL()
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = CONNECTION_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
             val isConnected = responseCode == 200
@@ -114,7 +122,11 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             OllamaApiResult(
                 isConnected = isConnected,
                 endpoint = baseUrl,
-                message = if (isConnected) "API endpoint is reachable" else "API endpoint not reachable (HTTP $responseCode)"
+                message = if (isConnected) {
+                    "API endpoint is reachable"
+                } else {
+                    "API endpoint not reachable (HTTP $responseCode)"
+                }
             )
         } catch (e: Exception) {
             OllamaApiResult(

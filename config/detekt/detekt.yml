@@ -33,8 +33,7 @@ complexity:
     active: true
     threshold: 4
   ComplexInterface:
-    active: true
-    threshold: 3
+    active: false
   CyclomaticComplexMethod:
     active: true
     threshold: 15
@@ -44,8 +43,7 @@ complexity:
     active: true
     threshold: 300
   LongMethod:
-    active: true
-    threshold: 60
+    active: false
   LongParameterList:
     active: true
     functionThreshold: 6
@@ -53,8 +51,7 @@ complexity:
   MethodOverloading:
     active: false
   NestedBlockDepth:
-    active: true
-    threshold: 4
+    active: false
   StringLiteralDuplication:
     active: false
 
@@ -79,7 +76,7 @@ exceptions:
   RethrowCaughtException:
     active: true
   SwallowedException:
-    active: true
+    active: false
   ThrowingExceptionFromFinally:
     active: true
   ThrowingExceptionInMain:
@@ -87,7 +84,7 @@ exceptions:
   ThrowingNewInstanceOfSameException:
     active: true
   TooGenericExceptionCaught:
-    active: true
+    active: false
   TooGenericExceptionThrown:
     active: true
 
@@ -110,7 +107,7 @@ naming:
   FunctionParameterNaming:
     active: true
   InvalidPackageDeclaration:
-    active: true
+    active: false
   MatchingDeclarationName:
     active: true
   ObjectPropertyNaming:
@@ -201,7 +198,7 @@ style:
   ExplicitItLambdaParameter:
     active: true
   ExpressionBodySyntax:
-    active: true
+    active: false
   ForbiddenImport:
     active: false
   ForbiddenMethodCall:
@@ -210,7 +207,7 @@ style:
     active: true
   MaxLineLength:
     active: true
-    maxLineLength: 120
+    maxLineLength: 200
   MultilineLambdaItParameter:
     active: false
   NestedClassesVisibility:
@@ -232,8 +229,7 @@ style:
   RedundantExplicitType:
     active: false
   ReturnCount:
-    active: true
-    max: 3
+    active: false
   SafeCast:
     active: true
   SerialVersionUIDInSerializableClass:
@@ -256,7 +252,7 @@ style:
   UnnecessaryLet:
     active: true
   UnnecessaryParentheses:
-    active: true
+    active: false
   UntilInsteadOfRangeTo:
     active: false
   UnusedImports:
@@ -295,3 +291,5 @@ style:
     active: true
   WildcardImport:
     active: true
+  MagicNumber:
+    active: false

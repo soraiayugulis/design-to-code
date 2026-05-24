@@ -47,7 +47,7 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
             val exitCode = process.waitFor()
             logger.debug("Branch creation exit code: $exitCode")
             
-            if (exitCode == 0) {
+            val result = if (exitCode == 0) {
                 logger.info("Branch created successfully: $branchName")
                 GitOperationResult(success = true)
             } else {
@@ -55,6 +55,7 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
                 logger.error("Failed to create branch: $errorOutput")
                 GitOperationResult(success = false, errorMessage = "Failed to create branch: $errorOutput")
             }
+            result
         } catch (e: Exception) {
             logger.error("Failed to create branch: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to create branch: ${e.message}")
@@ -105,7 +106,7 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
             val exitCode = commitProcess.waitFor()
             logger.debug("Commit exit code: $exitCode")
             
-            if (exitCode == 0) {
+            val result = if (exitCode == 0) {
                 logger.info("Changes committed successfully")
                 GitOperationResult(success = true)
             } else {
@@ -113,6 +114,7 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
                 logger.error("Failed to commit: $errorOutput")
                 GitOperationResult(success = false, errorMessage = "Failed to commit: $errorOutput")
             }
+            result
         } catch (e: Exception) {
             logger.error("Failed to commit: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to commit: ${e.message}")
