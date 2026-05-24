@@ -3,6 +3,7 @@ package com.designtocode.domain.adapter
 import com.designtocode.domain.port.AIAgentPort
 import com.designtocode.domain.port.GenerationResult
 import kotlinx.coroutines.withTimeout
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -13,21 +14,41 @@ class OllamaAdapter(
     private val model: String,
     private val timeoutMs: Long = 300000L
 ) : AIAgentPort {
+    companion object {
+        private const val CONNECTION_TIMEOUT_MS = 5000
+        private const val READ_TIMEOUT_MS = 5000
+        private const val HTTP_SUCCESS_CODE = 200
+        private const val FILE_PATH_GROUP_INDEX = 2
+        private const val FILE_CONTENT_GROUP_INDEX = 3
+    }
+
+    private val logger = LoggerFactory.getLogger(OllamaAdapter::class.java)
 
     override suspend fun generate(prompt: String, workspace: File): GenerationResult {
+        logger.info("Starting AI generation with Ollama")
+        logger.info("Ollama configuration: host=$host, port=$port, model=$model, timeout=${timeoutMs}ms")
+        logger.debug("Workspace: ${workspace.absolutePath}")
+        logger.debug("Prompt length: ${prompt.length} characters")
+        
         return try {
             withTimeout(timeoutMs) {
                 val response = callOllamaAPI(prompt)
                 if (response.success) {
+                    logger.info("Ollama API call succeeded")
+                    logger.debug("Response content length: ${response.content?.length ?: 0} characters")
                     val generatedFiles = parseGeneratedFiles(response.content ?: "", workspace)
+                    logger.info("Generated ${generatedFiles.size} files")
                     GenerationResult(success = true, generatedFiles = generatedFiles)
                 } else {
+                    logger.error("Ollama API call failed: ${response.error}")
                     GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = response.error ?: "Unknown error")
                 }
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            logger.error("AI generation timeout after ${timeoutMs}ms")
             GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "AI generation timeout after ${timeoutMs}ms")
         } catch (e: Exception) {
+            logger.error("Ollama connection error: ${e.message}", e)
             GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "Ollama connection error: ${e.message}")
         }
     }
@@ -40,8 +61,8 @@ class OllamaAdapter(
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
-            connection.connectTimeout = 5000 // 5 seconds connection timeout
-            connection.readTimeout = 5000 // 5 seconds read timeout
+            connection.connectTimeout = CONNECTION_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
             
             val requestBody = """
                 {
@@ -54,13 +75,13 @@ class OllamaAdapter(
             connection.outputStream.use { it.write(requestBody.toByteArray()) }
             
             val responseCode = connection.responseCode
-            val responseBody = if (responseCode == 200) {
+            val responseBody = if (responseCode == HTTP_SUCCESS_CODE) {
                 connection.inputStream.bufferedReader().use { it.readText() }
             } else {
                 connection.errorStream.bufferedReader().use { it.readText() }
             }
             
-            if (responseCode == 200) {
+            if (responseCode == HTTP_SUCCESS_CODE) {
                 OllamaResponse(success = true, content = responseBody, error = null)
             } else {
                 OllamaResponse(success = false, content = null, error = "HTTP $responseCode: $responseBody")
@@ -125,8 +146,8 @@ class OllamaAdapter(
             val matches = codeBlockRegex.findAll(content)
             
             for (match in matches) {
-                val filePath = match.groupValues[2]
-                val fileContent = match.groupValues[3]
+                val filePath = match.groupValues[FILE_PATH_GROUP_INDEX]
+                val fileContent = match.groupValues[FILE_CONTENT_GROUP_INDEX]
                 
                 // Validate file path is within workspace
                 if (isPathSafe(filePath, workspace)) {

@@ -25,6 +25,10 @@ dependencies {
     // YAML parsing
     implementation("org.yaml:snakeyaml:2.2")
     
+    // Logging
+    implementation("org.slf4j:slf4j-api:2.0.9")
+    implementation("ch.qos.logback:logback-classic:1.4.11")
+    
     // Testing
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")

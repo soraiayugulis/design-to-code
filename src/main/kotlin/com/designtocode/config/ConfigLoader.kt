@@ -4,6 +4,11 @@ import org.yaml.snakeyaml.Yaml
 import java.io.File
 
 class ConfigLoader {
+    companion object {
+        private const val MIN_COVERAGE_THRESHOLD = 0.0
+        private const val MAX_COVERAGE_THRESHOLD = 100.0
+    }
+
     private val yaml = Yaml()
 
     fun loadConfig(configFile: File): PipelineConfig {
@@ -59,9 +64,9 @@ class ConfigLoader {
     }
 
     private fun parseQualityGateConfig(qualityGateMap: Map<String, Any>): QualityGateConfig {
-        val coverageThreshold = qualityGateMap["coverageThreshold"] as? Double ?: 100.0
-        if (coverageThreshold < 0 || coverageThreshold > 100) {
-            throw ConfigException("Coverage threshold must be between 0 and 100")
+        val coverageThreshold = qualityGateMap["coverageThreshold"] as? Double ?: MAX_COVERAGE_THRESHOLD
+        if (coverageThreshold < MIN_COVERAGE_THRESHOLD || coverageThreshold > MAX_COVERAGE_THRESHOLD) {
+            throw ConfigException("Coverage threshold must be between $MIN_COVERAGE_THRESHOLD and $MAX_COVERAGE_THRESHOLD")
         }
 
         return QualityGateConfig(

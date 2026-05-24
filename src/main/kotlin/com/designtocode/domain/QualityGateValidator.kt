@@ -1,6 +1,7 @@
 package com.designtocode.domain
 
 import com.designtocode.domain.model.QualityGateResult
+import org.slf4j.LoggerFactory
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -17,11 +18,18 @@ class QualityGateValidator(
     private val timeoutSeconds: Long = 900L, // 15 minutes default
     private val coverageType: CoverageType = CoverageType.LINE
 ) {
+    private val logger = LoggerFactory.getLogger(QualityGateValidator::class.java)
 
     fun validate(): QualityGateResult {
+        logger.info("Starting quality gate validation")
+        logger.info("Project directory: ${projectDir.absolutePath}")
+        logger.info("Coverage threshold: $coverageThreshold%, type: $coverageType")
+        logger.info("Timeout: ${timeoutSeconds}s")
+        
         val buildResult = executeGradleBuild()
         
         if (!buildResult.success) {
+            logger.error("Gradle build failed: ${buildResult.errorMessage}")
             return QualityGateResult(
                 passed = false,
                 buildSuccess = false,
@@ -29,20 +37,32 @@ class QualityGateValidator(
                 errorMessage = buildResult.errorMessage
             )
         }
+        logger.info("Gradle build succeeded")
         
         val detektResult = executeDetekt()
         
         if (!detektResult.success) {
+            logger.error("Detekt failed: ${detektResult.errorMessage}")
+            logger.error("Detekt found ${detektResult.issueCount} issues")
             return QualityGateResult(
                 passed = false,
                 buildSuccess = true,
                 coveragePercentage = 0.0,
+                lintIssues = detektResult.issueCount,
                 errorMessage = detektResult.errorMessage
             )
         }
+        logger.info("Detekt passed with ${detektResult.issueCount} issues")
         
         val coveragePercentage = parseCoverageReport()
+        logger.info("Coverage percentage: $coveragePercentage%")
+        
         val passed = coveragePercentage >= coverageThreshold
+        if (!passed) {
+            logger.warn("Coverage $coveragePercentage% is below threshold $coverageThreshold%")
+        } else {
+            logger.info("Coverage meets threshold")
+        }
         
         return QualityGateResult(
             passed = passed,
@@ -54,12 +74,17 @@ class QualityGateValidator(
     }
     
     private fun executeGradleBuild(): BuildResult {
+        logger.debug("Executing Gradle build")
         return try {
             val gradleWrapper = File(projectDir, "gradlew")
+            logger.debug("Gradle wrapper path: ${gradleWrapper.absolutePath}")
+            
             if (!gradleWrapper.exists()) {
+                logger.error("Gradle wrapper not found at: ${gradleWrapper.absolutePath}")
                 return BuildResult(false, "Gradle wrapper not found in project directory")
             }
             
+            logger.debug("Starting Gradle build with timeout: ${timeoutSeconds}s")
             val process = ProcessBuilder(
                 gradleWrapper.absolutePath,
                 "clean",
@@ -76,6 +101,7 @@ class QualityGateValidator(
             val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
             
             if (!finished) {
+                logger.error("Gradle build timed out after ${timeoutSeconds}s")
                 process.destroyForcibly()
                 return BuildResult(false, "Gradle build timed out after ${timeoutSeconds}s")
             }
@@ -84,24 +110,33 @@ class QualityGateValidator(
             errorReader.use { it.lines().forEach { errorOutput.appendLine(it) } }
             
             val exitCode = process.exitValue()
+            logger.debug("Gradle build exit code: $exitCode")
             
             if (exitCode == 0) {
+                logger.info("Gradle build completed successfully")
                 BuildResult(true, null)
             } else {
                 val errorMessage = extractCompilationErrors(errorOutput.toString())
+                logger.error("Gradle build failed with exit code $exitCode: $errorMessage")
                 BuildResult(false, "Gradle build failed with exit code $exitCode. $errorMessage")
             }
         } catch (e: Exception) {
+            logger.error("Failed to execute Gradle build: ${e.message}", e)
             BuildResult(false, "Failed to execute Gradle build: ${e.message}")
         }
     }
     
+    companion object {
+        private const val PERCENTAGE_MULTIPLIER = 100.0
+        private const val MAX_ERROR_LINES = 3
+    }
+
     private fun extractCompilationErrors(errorOutput: String): String {
         if (errorOutput.contains("error:") || errorOutput.contains("FAILURE")) {
             val lines = errorOutput.lines()
             val errorLines = lines.filter { it.contains("error:") || it.contains("e:") }
             return if (errorLines.isNotEmpty()) {
-                errorLines.take(3).joinToString("; ")
+                errorLines.take(MAX_ERROR_LINES).joinToString("; ")
             } else {
                 "Build compilation failed"
             }
@@ -110,12 +145,17 @@ class QualityGateValidator(
     }
     
     private fun executeDetekt(): DetektResult {
+        logger.debug("Executing Detekt")
         return try {
             val gradleWrapper = File(projectDir, "gradlew")
+            logger.debug("Gradle wrapper path: ${gradleWrapper.absolutePath}")
+            
             if (!gradleWrapper.exists()) {
+                logger.warn("Gradle wrapper not found, skipping Detekt")
                 return DetektResult(success = true, issueCount = 0, errorMessage = null)
             }
             
+            logger.debug("Starting Detekt with timeout: ${timeoutSeconds}s")
             val process = ProcessBuilder(
                 gradleWrapper.absolutePath,
                 "detekt",
@@ -131,6 +171,7 @@ class QualityGateValidator(
             val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
             
             if (!finished) {
+                logger.error("Detekt timed out after ${timeoutSeconds}s")
                 process.destroyForcibly()
                 return DetektResult(success = false, issueCount = 0, errorMessage = "Detekt timed out after ${timeoutSeconds}s")
             }
@@ -139,14 +180,18 @@ class QualityGateValidator(
             errorReader.use { it.lines().forEach { errorOutput.appendLine(it) } }
             
             val exitCode = process.exitValue()
+            logger.debug("Detekt exit code: $exitCode")
             
             if (exitCode == 0) {
+                logger.info("Detekt completed successfully with no issues")
                 DetektResult(success = true, issueCount = 0, errorMessage = null)
             } else {
                 val issueCount = parseDetektOutput(output.toString())
+                logger.warn("Detekt found $issueCount issues")
                 DetektResult(success = false, issueCount = issueCount, errorMessage = "Detekt found $issueCount issues")
             }
         } catch (e: Exception) {
+            logger.error("Failed to execute Detekt: ${e.message}", e)
             DetektResult(success = false, issueCount = 0, errorMessage = "Failed to execute Detekt: ${e.message}")
         }
     }
@@ -201,7 +246,7 @@ class QualityGateValidator(
                 val covered = match.groupValues[2].toDouble()
                 val total = missed + covered
                 if (total > 0) {
-                    (covered / total) * 100.0
+                    (covered / total) * PERCENTAGE_MULTIPLIER
                 } else {
                     0.0
                 }
@@ -230,7 +275,7 @@ class QualityGateValidator(
                 val covered = match.groupValues[2].toDouble()
                 val total = missed + covered
                 if (total > 0) {
-                    (covered / total) * 100.0
+                    (covered / total) * PERCENTAGE_MULTIPLIER
                 } else {
                     0.0
                 }

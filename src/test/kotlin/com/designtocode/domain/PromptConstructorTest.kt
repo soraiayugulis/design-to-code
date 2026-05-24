@@ -6,7 +6,6 @@ import com.designtocode.domain.model.TechStack
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class PromptConstructorTest {
@@ -51,7 +50,9 @@ class PromptConstructorTest {
         globalRulesFile.writeText("# Global Rules")
         
         val springBootRulesFile = File(rulesDir, "spring-boot-rules.md")
-        springBootRulesFile.writeText("# Spring Boot Specific Rules\n\n- Use @RestController\n- Use constructor injection")
+        springBootRulesFile.writeText(
+            "# Spring Boot Specific Rules\n\n- Use @RestController\n- Use constructor injection"
+        )
         
         val projectContext = ProjectContext(
             techStack = TechStack.SPRING_BOOT,
