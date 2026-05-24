@@ -30,6 +30,17 @@ class QualityGateValidator(
             )
         }
         
+        val detektResult = executeDetekt()
+        
+        if (!detektResult.success) {
+            return QualityGateResult(
+                passed = false,
+                buildSuccess = true,
+                coveragePercentage = 0.0,
+                errorMessage = detektResult.errorMessage
+            )
+        }
+        
         val coveragePercentage = parseCoverageReport()
         val passed = coveragePercentage >= coverageThreshold
         
@@ -37,6 +48,7 @@ class QualityGateValidator(
             passed = passed,
             buildSuccess = true,
             coveragePercentage = coveragePercentage,
+            lintIssues = detektResult.issueCount,
             errorMessage = if (!passed) "Coverage $coveragePercentage% is below threshold $coverageThreshold%" else null
         )
     }
@@ -95,6 +107,64 @@ class QualityGateValidator(
             }
         }
         return "Build failed"
+    }
+    
+    private fun executeDetekt(): DetektResult {
+        return try {
+            val gradleWrapper = File(projectDir, "gradlew")
+            if (!gradleWrapper.exists()) {
+                return DetektResult(success = true, issueCount = 0, errorMessage = null)
+            }
+            
+            val process = ProcessBuilder(
+                gradleWrapper.absolutePath,
+                "detekt",
+                "--no-daemon"
+            ).directory(projectDir).start()
+            
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val errorReader = BufferedReader(InputStreamReader(process.errorStream))
+            
+            val output = StringBuilder()
+            val errorOutput = StringBuilder()
+            
+            val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
+            
+            if (!finished) {
+                process.destroyForcibly()
+                return DetektResult(success = false, issueCount = 0, errorMessage = "Detekt timed out after ${timeoutSeconds}s")
+            }
+            
+            reader.use { it.lines().forEach { output.appendLine(it) } }
+            errorReader.use { it.lines().forEach { errorOutput.appendLine(it) } }
+            
+            val exitCode = process.exitValue()
+            
+            if (exitCode == 0) {
+                DetektResult(success = true, issueCount = 0, errorMessage = null)
+            } else {
+                val issueCount = parseDetektOutput(output.toString())
+                DetektResult(success = false, issueCount = issueCount, errorMessage = "Detekt found $issueCount issues")
+            }
+        } catch (e: Exception) {
+            DetektResult(success = false, issueCount = 0, errorMessage = "Failed to execute Detekt: ${e.message}")
+        }
+    }
+    
+    private fun parseDetektOutput(output: String): Int {
+        // Parse Detekt output to count issues
+        // Look for patterns like "x issues found" or "Detekt found x issues"
+        val issuesFoundRegex = Regex("""(\d+) issues? found""")
+        val detektFoundRegex = Regex("""Detekt found (\d+) issues""")
+        
+        val match = issuesFoundRegex.find(output) ?: detektFoundRegex.find(output)
+        
+        if (match != null) {
+            return match.groupValues[1].toInt()
+        }
+        
+        // Fallback: count error lines
+        return output.lines().count { it.contains("error") || it.contains("Error") }
     }
     
     private fun parseCoverageReport(): Double {
@@ -174,6 +244,12 @@ class QualityGateValidator(
     
     private data class BuildResult(
         val success: Boolean,
+        val errorMessage: String?
+    )
+    
+    private data class DetektResult(
+        val success: Boolean,
+        val issueCount: Int,
         val errorMessage: String?
     )
 }
