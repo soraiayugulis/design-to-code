@@ -29,14 +29,45 @@ class PipelineOrchestrator(
         MDC.put("model", ollamaModel)
         
         try {
-            logger.info("=== Design-to-Code AI Pipeline Started ===")
-            logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
-            logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
-            logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}")
-            logger.info("Workspace: $workspacePath")
-            logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
-        
-        // Stage 1: Context Analysis
+            logPipelineStart()
+            
+            val projectContext = executeContextAnalysis()
+            val prompt = executePromptConstruction(projectContext)
+            val aiResult = executeAIGeneration(prompt)
+            
+            if (!aiResult.success) {
+                return@runBlocking PipelineResult(success = false, errorMessage = aiResult.errorMessage)
+            }
+            
+            val qualityResult = executeQualityGateValidation()
+            
+            if (!qualityResult.passed) {
+                return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
+            }
+            
+            val gitResult = executeGitOperations(qualityResult)
+            
+            if (!gitResult.success) {
+                return@runBlocking gitResult
+            }
+            
+            logPipelineSuccess(qualityResult)
+            PipelineResult(success = true)
+        } finally {
+            MDC.clear()
+        }
+    }
+
+    private fun logPipelineStart() {
+        logger.info("=== Design-to-Code AI Pipeline Started ===")
+        logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
+        logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
+        logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}")
+        logger.info("Workspace: $workspacePath")
+        logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
+    }
+
+    private fun executeContextAnalysis(): com.designtocode.domain.model.ProjectContext {
         logger.info("[Stage 1] Context Analysis & Detection")
         val buildFile = File(workspacePath, "build.gradle.kts")
         logger.debug("Looking for build file at: ${buildFile.absolutePath}")
@@ -46,7 +77,10 @@ class PipelineOrchestrator(
         logger.info("Detected: ${projectContext.techStack.toFriendlyName()}, ${projectContext.database.toFriendlyName()}")
         logger.debug("Project context: techStack=${projectContext.techStack}, database=${projectContext.database}")
         
-        // Stage 2: Prompt Construction
+        return projectContext
+    }
+
+    private fun executePromptConstruction(projectContext: com.designtocode.domain.model.ProjectContext): String {
         logger.info("[Stage 2] Prompt Construction")
         val rulesDir = File(workspacePath, "rules")
         logger.debug("Rules directory: ${rulesDir.absolutePath}")
@@ -56,7 +90,10 @@ class PipelineOrchestrator(
         logger.info("Prompt constructed with ${changedFiles.size} spec files")
         logger.debug("Prompt length: ${prompt.length} characters")
         
-        // Stage 3: AI Generation
+        return prompt
+    }
+
+    private suspend fun executeAIGeneration(prompt: String): com.designtocode.domain.port.GenerationResult {
         logger.info("[Stage 3] AI Generation")
         logger.info("Ollama configuration: host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel, timeout=${config.ai.timeoutMs}ms")
         
@@ -71,11 +108,14 @@ class PipelineOrchestrator(
         if (!aiResult.success) {
             logger.error("AI generation failed: ${aiResult.errorMessage}")
             logger.error("AI generation error details - success=${aiResult.success}, error=${aiResult.errorMessage}")
-            return@runBlocking PipelineResult(success = false, errorMessage = aiResult.errorMessage)
+        } else {
+            logger.info("AI generation completed successfully")
         }
-        logger.info("AI generation completed successfully")
         
-        // Stage 4: Quality Gate Validation
+        return aiResult
+    }
+
+    private fun executeQualityGateValidation(): com.designtocode.domain.model.QualityGateResult {
         logger.info("[Stage 4] Quality Gate Validation")
         val coverageType = when (config.qualityGate.coverageType.uppercase()) {
             "BRANCH" -> CoverageType.BRANCH
@@ -102,11 +142,14 @@ class PipelineOrchestrator(
                     "coverage=${qualityResult.coveragePercentage}%, " +
                     "lintIssues=${qualityResult.lintIssues}"
             )
-            return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
+        } else {
+            logger.info("Quality gate passed: ${qualityResult.coveragePercentage}% coverage, ${qualityResult.lintIssues} lint issues")
         }
-        logger.info("Quality gate passed: ${qualityResult.coveragePercentage}% coverage, ${qualityResult.lintIssues} lint issues")
         
-        // Stage 5: Git Operations
+        return qualityResult
+    }
+
+    private fun executeGitOperations(qualityResult: com.designtocode.domain.model.QualityGateResult): PipelineResult {
         logger.info("[Stage 5] Git Operations & PR Creation")
         val gitOperations: GitOperationsPort = GitHubCliAdapter(File(workspacePath))
         val branchName = "${config.git.branchPrefix}-${System.currentTimeMillis()}"
@@ -115,7 +158,7 @@ class PipelineOrchestrator(
         val branchResult = gitOperations.createFeatureBranch(branchName)
         if (!branchResult.success) {
             logger.error("Branch creation failed: ${branchResult.errorMessage}")
-            return@runBlocking PipelineResult(success = false, errorMessage = branchResult.errorMessage)
+            return PipelineResult(success = false, errorMessage = branchResult.errorMessage)
         }
         logger.info("Branch created successfully: $branchName")
         
@@ -123,7 +166,7 @@ class PipelineOrchestrator(
         val commitResult = gitOperations.commitChanges("feat: AI-generated code changes")
         if (!commitResult.success) {
             logger.error("Commit failed: ${commitResult.errorMessage}")
-            return@runBlocking PipelineResult(success = false, errorMessage = commitResult.errorMessage)
+            return PipelineResult(success = false, errorMessage = commitResult.errorMessage)
         }
         logger.info("Changes committed successfully")
         
@@ -137,16 +180,16 @@ class PipelineOrchestrator(
         if (!prResult.success) {
             logger.error("PR creation failed: ${prResult.errorMessage}")
             logger.error("PR creation error details - success=${prResult.success}, error=${prResult.errorMessage}")
-            return@runBlocking PipelineResult(success = false, errorMessage = prResult.errorMessage)
+            return PipelineResult(success = false, errorMessage = prResult.errorMessage)
         }
         logger.info("PR created successfully")
         
+        return PipelineResult(success = true)
+    }
+
+    private fun logPipelineSuccess(qualityResult: com.designtocode.domain.model.QualityGateResult) {
         logger.info("=== Pipeline Completed Successfully ===")
         logger.info("Final result: success=true, coverage=${qualityResult.coveragePercentage}%, lintIssues=${qualityResult.lintIssues}")
-        return@runBlocking PipelineResult(success = true)
-        } finally {
-            MDC.clear()
-        }
     }
 }
 
