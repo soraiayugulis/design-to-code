@@ -3,7 +3,7 @@ name: Design-to-Code AI Pipeline
 on:
   pull_request:
     branches:
-      - 'feature-ai/**'
+      - 'design/**'
   workflow_dispatch:
     inputs:
       changed_files:
@@ -15,6 +15,10 @@ on:
         required: false
         type: string
         default: '.'
+      config_path:
+        description: 'Path to configuration file (optional, defaults to pipeline.yml in workspace)'
+        required: false
+        type: string
       ollama_model:
         description: 'Ollama model to use for code generation'
         required: false
@@ -24,6 +28,17 @@ on:
 jobs:
   design-to-code:
     runs-on: ubuntu-latest
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+        options: >-
+          --name ollama
+          --health-cmd /usr/bin/ollama serve
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -68,6 +83,10 @@ jobs:
         run: |
           ./gradlew build -x test
       
+      - name: Pull Ollama model
+        run: |
+          docker exec ollama ollama pull ${{ inputs.ollama_model || 'codellama:13b' }}
+      
       - name: Run Design-to-Code Pipeline
         if: steps.changed-files.outputs.changed_files != ''
         env:
@@ -75,14 +94,40 @@ jobs:
         run: |
           WORKSPACE_PATH="${{ inputs.workspace_path || '.' }}"
           CHANGED_FILES="${{ steps.changed-files.outputs.changed_files }}"
+          CONFIG_PATH="${{ inputs.config_path || '' }}"
           OLLAMA_MODEL="${{ inputs.ollama_model || 'codellama:13b' }}"
           
           echo "Running pipeline with:"
           echo "  Workspace: $WORKSPACE_PATH"
           echo "  Changed files: $CHANGED_FILES"
+          echo "  Config path: $CONFIG_PATH"
           echo "  Ollama model: $OLLAMA_MODEL"
           
-          ./gradlew run --args="$CHANGED_FILES $WORKSPACE_PATH $OLLAMA_MODEL"
+          if [ -n "$CONFIG_PATH" ]; then
+            ./gradlew run --args="-c $CONFIG_PATH $CHANGED_FILES $WORKSPACE_PATH"
+          else
+            ./gradlew run --args="$CHANGED_FILES $WORKSPACE_PATH"
+          fi
+      
+      - name: Upload generated code artifacts
+        if: steps.changed-files.outputs.changed_files != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-code
+          path: |
+            **/*.kt
+            **/*.java
+          retention-days: 7
+      
+      - name: Upload coverage reports
+        if: steps.changed-files.outputs.changed_files != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            build/reports/kover/
+            build/reports/jacoco/
+          retention-days: 7
       
       - name: Skip pipeline
         if: steps.changed-files.outputs.changed_files == ''
