@@ -43,7 +43,8 @@ complexity:
     active: true
     threshold: 300
   LongMethod:
-    active: false
+    active: true
+    threshold: 60
   LongParameterList:
     active: true
     functionThreshold: 6
@@ -292,4 +293,4 @@ style:
   WildcardImport:
     active: true
   MagicNumber:
-    active: false
+    active: true

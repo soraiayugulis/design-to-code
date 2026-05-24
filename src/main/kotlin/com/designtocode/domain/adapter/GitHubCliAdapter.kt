@@ -9,6 +9,10 @@ import java.io.File
 import java.io.InputStreamReader
 
 class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
+    companion object {
+        private const val MIN_BRANCH_LENGTH = 8
+    }
+
     private val logger = LoggerFactory.getLogger(GitHubCliAdapter::class.java)
 
     override fun createFeatureBranch(branchName: String): GitOperationResult {
@@ -207,7 +211,7 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         // Validate branch naming convention: feature/ai-gen-{sha}
         // Allow alphanumeric and hyphens for the SHA part for flexibility
         // For now, just ensure it's not empty and starts with feature/
-        return branchName.startsWith("feature/") && branchName.length > 8
+        return branchName.startsWith("feature/") && branchName.length > MIN_BRANCH_LENGTH
     }
 
     private fun isValidCommitMessage(message: String): Boolean {

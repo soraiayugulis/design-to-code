@@ -19,6 +19,9 @@ data class EnvironmentValidationResult(
 )
 
 class EnvironmentValidator {
+    companion object {
+        private const val GIT_VERSION_PARTS = 3
+    }
 
     fun validateJavaVersion(): ValidationResult {
         return try {
@@ -159,7 +162,6 @@ class EnvironmentValidator {
     private fun extractGitVersion(output: String?): String {
         if (output == null) return "unknown"
         val parts = output.split(" ")
-        val expectedParts = 3
-        return if (parts.size >= expectedParts) parts[2] else "unknown"
+        return if (parts.size >= GIT_VERSION_PARTS) parts[2] else "unknown"
     }
 }

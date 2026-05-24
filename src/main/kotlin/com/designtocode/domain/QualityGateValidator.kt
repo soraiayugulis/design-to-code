@@ -126,12 +126,17 @@ class QualityGateValidator(
         }
     }
     
+    companion object {
+        private const val PERCENTAGE_MULTIPLIER = 100.0
+        private const val MAX_ERROR_LINES = 3
+    }
+
     private fun extractCompilationErrors(errorOutput: String): String {
         if (errorOutput.contains("error:") || errorOutput.contains("FAILURE")) {
             val lines = errorOutput.lines()
             val errorLines = lines.filter { it.contains("error:") || it.contains("e:") }
             return if (errorLines.isNotEmpty()) {
-                errorLines.take(3).joinToString("; ")
+                errorLines.take(MAX_ERROR_LINES).joinToString("; ")
             } else {
                 "Build compilation failed"
             }
@@ -241,7 +246,7 @@ class QualityGateValidator(
                 val covered = match.groupValues[2].toDouble()
                 val total = missed + covered
                 if (total > 0) {
-                    (covered / total) * 100.0
+                    (covered / total) * PERCENTAGE_MULTIPLIER
                 } else {
                     0.0
                 }
@@ -270,7 +275,7 @@ class QualityGateValidator(
                 val covered = match.groupValues[2].toDouble()
                 val total = missed + covered
                 if (total > 0) {
-                    (covered / total) * 100.0
+                    (covered / total) * PERCENTAGE_MULTIPLIER
                 } else {
                     0.0
                 }

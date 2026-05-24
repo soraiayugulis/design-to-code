@@ -14,6 +14,14 @@ class OllamaAdapter(
     private val model: String,
     private val timeoutMs: Long = 300000L
 ) : AIAgentPort {
+    companion object {
+        private const val CONNECTION_TIMEOUT_MS = 5000
+        private const val READ_TIMEOUT_MS = 5000
+        private const val HTTP_SUCCESS_CODE = 200
+        private const val FILE_PATH_GROUP_INDEX = 2
+        private const val FILE_CONTENT_GROUP_INDEX = 3
+    }
+
     private val logger = LoggerFactory.getLogger(OllamaAdapter::class.java)
 
     override suspend fun generate(prompt: String, workspace: File): GenerationResult {
@@ -53,8 +61,8 @@ class OllamaAdapter(
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
-            connection.connectTimeout = 5000 // 5 seconds connection timeout
-            connection.readTimeout = 5000 // 5 seconds read timeout
+            connection.connectTimeout = CONNECTION_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
             
             val requestBody = """
                 {
@@ -67,13 +75,13 @@ class OllamaAdapter(
             connection.outputStream.use { it.write(requestBody.toByteArray()) }
             
             val responseCode = connection.responseCode
-            val responseBody = if (responseCode == 200) {
+            val responseBody = if (responseCode == HTTP_SUCCESS_CODE) {
                 connection.inputStream.bufferedReader().use { it.readText() }
             } else {
                 connection.errorStream.bufferedReader().use { it.readText() }
             }
             
-            if (responseCode == 200) {
+            if (responseCode == HTTP_SUCCESS_CODE) {
                 OllamaResponse(success = true, content = responseBody, error = null)
             } else {
                 OllamaResponse(success = false, content = null, error = "HTTP $responseCode: $responseBody")
@@ -138,8 +146,8 @@ class OllamaAdapter(
             val matches = codeBlockRegex.findAll(content)
             
             for (match in matches) {
-                val filePath = match.groupValues[2]
-                val fileContent = match.groupValues[3]
+                val filePath = match.groupValues[FILE_PATH_GROUP_INDEX]
+                val fileContent = match.groupValues[FILE_CONTENT_GROUP_INDEX]
                 
                 // Validate file path is within workspace
                 if (isPathSafe(filePath, workspace)) {

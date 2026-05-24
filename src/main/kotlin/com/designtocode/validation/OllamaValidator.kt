@@ -27,6 +27,7 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
     companion object {
         private const val CONNECTION_TIMEOUT_MS = 5000
         private const val READ_TIMEOUT_MS = 5000
+        private const val HTTP_SUCCESS_CODE = 200
     }
 
     private val baseUrl = "http://$host:$port"
@@ -40,7 +41,7 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
-            val isAvailable = responseCode == 200
+            val isAvailable = responseCode == HTTP_SUCCESS_CODE
 
             val version = if (isAvailable) {
                 extractOllamaVersion(connection)
@@ -77,7 +78,7 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
-            if (responseCode != 200) {
+            if (responseCode != HTTP_SUCCESS_CODE) {
                 connection.disconnect()
                 return OllamaModelResult(
                     isAvailable = false,
@@ -115,7 +116,7 @@ class OllamaValidator(private val host: String = "localhost", private val port: 
             connection.readTimeout = READ_TIMEOUT_MS
 
             val responseCode = connection.responseCode
-            val isConnected = responseCode == 200
+            val isConnected = responseCode == HTTP_SUCCESS_CODE
 
             connection.disconnect()
 
