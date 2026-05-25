@@ -1,4 +1,7 @@
-# Design-to-Code AI Pipeline Platform - Implementation Phases
+# [SPRECIFICATION-PHASES]Design-to-Code AI Pipeline Platform - Implementation Shell Phases
+**Status:** DONE
+**Specification:** @docs/spec/spec-context.md
+**Instructions:** Always use `@workflow:new-feature-sdd` and `@rules:cascade-response-spec`
 
 ## Phase 1: Context Analysis & Detection
 **Objective**: Implement core context detection logic to analyze project build configuration and identify technical stack.
