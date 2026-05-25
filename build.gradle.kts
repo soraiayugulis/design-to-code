@@ -3,6 +3,7 @@ plugins {
     kotlin("plugin.spring") version "1.9.21"
     application
     id("io.gitlab.arturbosch.detekt") version "1.23.4"
+    id("org.jetbrains.kotlinx.kover") version "0.7.6"
 }
 
 group = "com.designtocode"
