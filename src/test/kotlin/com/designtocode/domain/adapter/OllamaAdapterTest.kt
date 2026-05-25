@@ -3,8 +3,9 @@ package com.designtocode.domain.adapter
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import java.io.File
 
 class OllamaAdapterTest {
 

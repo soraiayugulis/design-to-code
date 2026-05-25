@@ -3,9 +3,10 @@ package com.designtocode.domain.adapter
 import com.designtocode.domain.model.QualityGateResult
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import java.io.File
 
 class GitHubCliAdapterTest {
 

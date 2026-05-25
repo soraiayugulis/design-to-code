@@ -110,7 +110,7 @@ class ConfigLoaderTest {
         val exception = assertFailsWith<ConfigException> {
             configLoader.loadConfig(configFile)
         }
-        assertTrue(exception.message?.contains("Coverage threshold must be between 0 and 100") == true)
+        assertTrue(exception.message?.contains("Coverage threshold must be between 0.0 and 100.0") == true)
     }
 
     @Test
