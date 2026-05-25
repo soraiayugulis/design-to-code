@@ -3,9 +3,12 @@ package com.designtocode.cli
 import com.designtocode.config.PipelineConfig
 import com.designtocode.domain.ContextBuilder
 import com.designtocode.domain.CoverageType
+import com.designtocode.domain.MetricsCollector
+import com.designtocode.domain.PipelineMetrics
 import com.designtocode.domain.PromptConstructor
 import com.designtocode.domain.QualityGateValidator
 import com.designtocode.domain.RetryHelper
+import com.designtocode.domain.StageMetrics
 import com.designtocode.domain.adapter.GitHubCliAdapter
 import com.designtocode.domain.adapter.OllamaAdapter
 import com.designtocode.domain.port.GitOperationsPort
@@ -23,6 +26,7 @@ class PipelineOrchestrator(
 ) {
     private val logger = LoggerFactory.getLogger(PipelineOrchestrator::class.java)
     private val retryHelper = RetryHelper(config.retry)
+    private val metricsCollector = MetricsCollector()
 
     fun execute(): PipelineResult = runBlocking {
         val requestId = UUID.randomUUID().toString()
@@ -30,30 +34,53 @@ class PipelineOrchestrator(
         MDC.put("workspace", workspacePath)
         MDC.put("model", ollamaModel)
         
+        val metrics = metricsCollector.startPipeline(requestId)
+        
         try {
             logPipelineStart()
             
+            val contextStartTime = java.time.Instant.now()
             val projectContext = executeContextAnalysis()
+            val contextEndTime = java.time.Instant.now()
+            metrics.addStage(StageMetrics("Context Analysis", contextStartTime, contextEndTime, true))
+            
+            val promptStartTime = java.time.Instant.now()
             val prompt = executePromptConstruction(projectContext)
+            val promptEndTime = java.time.Instant.now()
+            metrics.addStage(StageMetrics("Prompt Construction", promptStartTime, promptEndTime, true))
+            
+            val aiStartTime = java.time.Instant.now()
             val aiResult = executeAIGeneration(prompt)
+            val aiEndTime = java.time.Instant.now()
+            metrics.addStage(StageMetrics("AI Generation", aiStartTime, aiEndTime, aiResult.success))
             
             if (!aiResult.success) {
+                metricsCollector.completePipeline(metrics, false)
                 return@runBlocking PipelineResult(success = false, errorMessage = aiResult.errorMessage)
             }
             
+            val qualityStartTime = java.time.Instant.now()
             val qualityResult = executeQualityGateValidation()
+            val qualityEndTime = java.time.Instant.now()
+            metrics.addStage(StageMetrics("Quality Gate Validation", qualityStartTime, qualityEndTime, qualityResult.passed))
             
             if (!qualityResult.passed) {
+                metricsCollector.completePipeline(metrics, false)
                 return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
             }
             
+            val gitStartTime = java.time.Instant.now()
             val gitResult = executeGitOperations(qualityResult)
+            val gitEndTime = java.time.Instant.now()
+            metrics.addStage(StageMetrics("Git Operations", gitStartTime, gitEndTime, gitResult.success))
             
             if (!gitResult.success) {
+                metricsCollector.completePipeline(metrics, false)
                 return@runBlocking gitResult
             }
             
-            logPipelineSuccess(qualityResult)
+            metricsCollector.completePipeline(metrics, true)
+            logPipelineSuccess(qualityResult, metrics)
             PipelineResult(success = true)
         } finally {
             MDC.clear()
@@ -214,9 +241,19 @@ class PipelineOrchestrator(
         return PipelineResult(success = true)
     }
 
-    private fun logPipelineSuccess(qualityResult: com.designtocode.domain.model.QualityGateResult) {
+    private fun logPipelineSuccess(qualityResult: com.designtocode.domain.model.QualityGateResult, metrics: PipelineMetrics) {
         logger.info("=== Pipeline Completed Successfully ===")
         logger.info("Final result: success=true, coverage=${qualityResult.coveragePercentage}%, lintIssues=${qualityResult.lintIssues}")
+        logger.info("Pipeline Duration: ${metrics.duration?.toSeconds()}s")
+        logger.info("Stage Success Rate: ${(metrics.successRate * SUCCESS_RATE_MULTIPLIER).toInt()}%")
+        logger.info("Stage Details:")
+        metrics.stages.forEach { stage ->
+            logger.info("  - ${stage.stageName}: ${if (stage.success) "✅" else "❌"} (${stage.duration.toSeconds()}s)")
+        }
+    }
+
+    companion object {
+        private const val SUCCESS_RATE_MULTIPLIER = 100
     }
 }
 
