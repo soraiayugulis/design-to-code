@@ -5,6 +5,7 @@ import com.designtocode.domain.ContextBuilder
 import com.designtocode.domain.CoverageType
 import com.designtocode.domain.PromptConstructor
 import com.designtocode.domain.QualityGateValidator
+import com.designtocode.domain.RetryHelper
 import com.designtocode.domain.adapter.GitHubCliAdapter
 import com.designtocode.domain.adapter.OllamaAdapter
 import com.designtocode.domain.port.GitOperationsPort
@@ -21,6 +22,7 @@ class PipelineOrchestrator(
     private val config: PipelineConfig
 ) {
     private val logger = LoggerFactory.getLogger(PipelineOrchestrator::class.java)
+    private val retryHelper = RetryHelper(config.retry)
 
     fun execute(): PipelineResult = runBlocking {
         val requestId = UUID.randomUUID().toString()
@@ -103,16 +105,41 @@ class PipelineOrchestrator(
             model = ollamaModel,
             timeoutMs = config.ai.timeoutMs
         )
-        val aiResult = ollamaAdapter.generate(prompt, File(workspacePath))
         
-        if (!aiResult.success) {
-            logger.error("AI generation failed: ${aiResult.errorMessage}")
-            logger.error("AI generation error details - success=${aiResult.success}, error=${aiResult.errorMessage}")
+        val aiResult = retryHelper.retryWithBackoff(
+            operationName = "AI Generation",
+            operation = {
+                ollamaAdapter.generate(prompt, File(workspacePath))
+            },
+            isTransientFailure = { throwable ->
+                val message = throwable.message?.lowercase() ?: ""
+                message.contains("timeout") ||
+                message.contains("connection") ||
+                message.contains("network") ||
+                message.contains("503") ||
+                message.contains("502") ||
+                message.contains("504")
+            }
+        )
+        
+        if (aiResult.isFailure) {
+            val error = aiResult.exceptionOrNull()
+            logger.error("AI generation failed after retries: ${error?.message}")
+            return com.designtocode.domain.port.GenerationResult(
+                success = false,
+                generatedFiles = emptyList(),
+                errorMessage = error?.message ?: "AI generation failed after retries"
+            )
+        }
+        
+        val result = aiResult.getOrNull()!!
+        if (!result.success) {
+            logger.error("AI generation failed: ${result.errorMessage}")
         } else {
             logger.info("AI generation completed successfully")
         }
         
-        return aiResult
+        return result
     }
 
     private fun executeQualityGateValidation(): com.designtocode.domain.model.QualityGateResult {

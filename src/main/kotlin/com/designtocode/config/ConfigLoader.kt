@@ -38,12 +38,14 @@ class ConfigLoader {
         val gitConfig = parseGitConfig(configMap["git"] as? Map<String, Any> ?: emptyMap())
         val qualityGateConfig = parseQualityGateConfig(configMap["qualityGate"] as? Map<String, Any> ?: emptyMap())
         val buildConfig = parseBuildConfig(configMap["build"] as? Map<String, Any> ?: emptyMap())
+        val retryConfig = parseRetryConfig(configMap["retry"] as? Map<String, Any> ?: emptyMap())
 
         return PipelineConfig(
             ai = aiConfig,
             git = gitConfig,
             qualityGate = qualityGateConfig,
-            build = buildConfig
+            build = buildConfig,
+            retry = retryConfig
         )
     }
 
@@ -85,6 +87,15 @@ class ConfigLoader {
         return BuildConfig(
             gradleTasks = gradleTasks,
             useDaemon = buildMap["useDaemon"] as? Boolean ?: false
+        )
+    }
+
+    private fun parseRetryConfig(retryMap: Map<String, Any>): RetryConfig {
+        return RetryConfig(
+            maxAttempts = retryMap["maxAttempts"] as? Int ?: 3,
+            initialDelayMs = retryMap["initialDelayMs"] as? Long ?: 1000L,
+            maxDelayMs = retryMap["maxDelayMs"] as? Long ?: 10000L,
+            backoffMultiplier = retryMap["backoffMultiplier"] as? Double ?: 2.0
         )
     }
 }
