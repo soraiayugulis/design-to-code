@@ -1,11 +1,12 @@
 package com.designtocode.domain.port
 
+import com.designtocode.domain.adapter.PRMetadata
 import com.designtocode.domain.model.QualityGateResult
 
 interface GitOperationsPort {
     fun createFeatureBranch(branchName: String): GitOperationResult
     fun commitChanges(message: String): GitOperationResult
-    fun createPullRequest(title: String, description: String, qualityResult: QualityGateResult): GitOperationResult
+    fun createPullRequest(title: String, description: String, qualityResult: QualityGateResult, metadata: PRMetadata = PRMetadata()): GitOperationResult
 }
 
 data class GitOperationResult(
