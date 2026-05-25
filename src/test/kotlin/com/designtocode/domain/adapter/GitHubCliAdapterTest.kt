@@ -1,6 +1,5 @@
 package com.designtocode.domain.adapter
 
-import com.designtocode.domain.model.PRMetadata
 import com.designtocode.domain.model.QualityGateResult
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
