@@ -8,9 +8,16 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 
+data class PRMetadata(
+    val labels: List<String> = emptyList(),
+    val reviewers: List<String> = emptyList(),
+    val assignees: List<String> = emptyList()
+)
+
 class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
     companion object {
         private const val MIN_BRANCH_LENGTH = 8
+        private const val MAX_ERROR_MESSAGE_LENGTH = 200
     }
 
     private val logger = LoggerFactory.getLogger(GitHubCliAdapter::class.java)
@@ -42,6 +49,14 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
                 return GitOperationResult(success = false, errorMessage = "Branch '$branchName' already exists")
             }
 
+            // Check for potential merge conflicts with target branch
+            logger.debug("Checking for potential merge conflicts")
+            val conflictCheck = checkForMergeConflicts(branchName)
+            if (!conflictCheck.success) {
+                logger.error("Merge conflict detected: ${conflictCheck.errorMessage}")
+                return conflictCheck
+            }
+
             // Create new branch
             logger.debug("Creating new branch")
             val process = ProcessBuilder("git", "checkout", "-b", branchName)
@@ -63,6 +78,48 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         } catch (e: Exception) {
             logger.error("Failed to create branch: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to create branch: ${e.message}")
+        }
+    }
+
+    private fun checkForMergeConflicts(branchName: String): GitOperationResult {
+        return try {
+            // Get current branch
+            val currentBranchProcess = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+                .directory(projectDir)
+                .start()
+            val currentBranch = BufferedReader(InputStreamReader(currentBranchProcess.inputStream)).use { it.readText().trim() }
+            currentBranchProcess.waitFor()
+            
+            logger.debug("Current branch: $currentBranch")
+            
+            // Try a dry-run merge to detect conflicts
+            val mergeProcess = ProcessBuilder("git", "merge", "--no-commit", "--no-ff", branchName)
+                .directory(projectDir)
+                .start()
+            val mergeExitCode = mergeProcess.waitFor()
+            
+            // Abort the merge regardless of result
+            ProcessBuilder("git", "merge", "--abort")
+                .directory(projectDir)
+                .start()
+                .waitFor()
+            
+            if (mergeExitCode != 0) {
+                val errorOutput = BufferedReader(InputStreamReader(mergeProcess.errorStream)).use { it.readText() }
+                logger.warn("Potential merge conflict detected: $errorOutput")
+                GitOperationResult(
+                    success = false,
+                    errorMessage = "Potential merge conflict detected with branch '$branchName'. " +
+                        "This may cause issues when merging to '$currentBranch'. " +
+                        "Conflict details: ${errorOutput.take(MAX_ERROR_MESSAGE_LENGTH)}"
+                )
+            } else {
+                GitOperationResult(success = true)
+            }
+        } catch (e: Exception) {
+            logger.warn("Could not check for merge conflicts: ${e.message}")
+            // Don't fail branch creation if conflict check fails
+            GitOperationResult(success = true)
         }
     }
 
@@ -128,10 +185,12 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
     override fun createPullRequest(
         title: String,
         description: String,
-        qualityResult: QualityGateResult
+        qualityResult: QualityGateResult,
+        metadata: PRMetadata
     ): GitOperationResult {
         logger.info("Creating pull request with title: $title")
         logger.debug("Quality gate result: passed=${qualityResult.passed}, coverage=${qualityResult.coveragePercentage}%, lintIssues=${qualityResult.lintIssues}")
+        logger.debug("PR metadata: labels=${metadata.labels}, reviewers=${metadata.reviewers}, assignees=${metadata.assignees}")
         
         if (title.isBlank()) {
             logger.error("PR title cannot be empty")
@@ -163,20 +222,20 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
                 return GitOperationResult(success = false, errorMessage = "GitHub CLI (gh) is not installed")
             }
 
+            // Build gh CLI command with metadata
+            val command = buildPRCommand(title, fullDescription, metadata)
+
             // Create PR using gh CLI
-            logger.debug("Creating PR using gh CLI")
-            val process = ProcessBuilder(
-                "gh", "pr", "create",
-                "--title", title,
-                "--body", fullDescription,
-                "--base", "main"
-            ).directory(projectDir).start()
+            logger.debug("Creating PR using gh CLI with command: ${command.joinToString(" ")}")
+            val process = ProcessBuilder(command)
+                .directory(projectDir)
+                .start()
             
             val exitCode = process.waitFor()
             logger.debug("PR creation exit code: $exitCode")
             
             if (exitCode == 0) {
-                logger.info("Pull request created successfully")
+                logger.info("Pull request created successfully with metadata")
                 GitOperationResult(success = true)
             } else {
                 val errorOutput = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
@@ -195,6 +254,36 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
             logger.error("Failed to create PR: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to create PR: ${e.message}")
         }
+    }
+
+    private fun buildPRCommand(title: String, description: String, metadata: PRMetadata): List<String> {
+        val command = mutableListOf("gh", "pr", "create")
+        command.add("--title")
+        command.add(title)
+        command.add("--body")
+        command.add(description)
+        command.add("--base")
+        command.add("main")
+        
+        // Add labels if provided
+        if (metadata.labels.isNotEmpty()) {
+            command.add("--label")
+            command.add(metadata.labels.joinToString(","))
+        }
+        
+        // Add reviewers if provided
+        if (metadata.reviewers.isNotEmpty()) {
+            command.add("--reviewer")
+            command.add(metadata.reviewers.joinToString(","))
+        }
+        
+        // Add assignees if provided
+        if (metadata.assignees.isNotEmpty()) {
+            command.add("--assignee")
+            command.add(metadata.assignees.joinToString(","))
+        }
+        
+        return command
     }
 
     private fun buildQualityGateSummary(qualityResult: QualityGateResult): String {
