@@ -25,6 +25,10 @@ dependencies {
     // YAML parsing
     implementation("org.yaml:snakeyaml:2.2")
     
+    // CLI
+    implementation("info.picocli:picocli:4.7.5")
+    annotationProcessor("info.picocli:picocli-codegen:4.7.5")
+    
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.9")
     implementation("ch.qos.logback:logback-classic:1.4.11")

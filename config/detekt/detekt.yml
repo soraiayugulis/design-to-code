@@ -110,7 +110,7 @@ naming:
   InvalidPackageDeclaration:
     active: false
   MatchingDeclarationName:
-    active: true
+    active: false
   ObjectPropertyNaming:
     active: true
   PackageNaming:
@@ -131,7 +131,7 @@ performance:
   ForEachOnRange:
     active: true
   SpreadOperator:
-    active: true
+    active: false
   UnnecessaryTemporaryInstantiation:
     active: true
 
