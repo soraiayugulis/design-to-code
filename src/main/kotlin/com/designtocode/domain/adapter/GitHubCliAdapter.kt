@@ -11,6 +11,7 @@ import java.io.InputStreamReader
 class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
     companion object {
         private const val MIN_BRANCH_LENGTH = 8
+        private const val MAX_ERROR_MESSAGE_LENGTH = 200
     }
 
     private val logger = LoggerFactory.getLogger(GitHubCliAdapter::class.java)
@@ -42,6 +43,14 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
                 return GitOperationResult(success = false, errorMessage = "Branch '$branchName' already exists")
             }
 
+            // Check for potential merge conflicts with target branch
+            logger.debug("Checking for potential merge conflicts")
+            val conflictCheck = checkForMergeConflicts(branchName)
+            if (!conflictCheck.success) {
+                logger.error("Merge conflict detected: ${conflictCheck.errorMessage}")
+                return conflictCheck
+            }
+
             // Create new branch
             logger.debug("Creating new branch")
             val process = ProcessBuilder("git", "checkout", "-b", branchName)
@@ -63,6 +72,48 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         } catch (e: Exception) {
             logger.error("Failed to create branch: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to create branch: ${e.message}")
+        }
+    }
+
+    private fun checkForMergeConflicts(branchName: String): GitOperationResult {
+        return try {
+            // Get current branch
+            val currentBranchProcess = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+                .directory(projectDir)
+                .start()
+            val currentBranch = BufferedReader(InputStreamReader(currentBranchProcess.inputStream)).use { it.readText().trim() }
+            currentBranchProcess.waitFor()
+            
+            logger.debug("Current branch: $currentBranch")
+            
+            // Try a dry-run merge to detect conflicts
+            val mergeProcess = ProcessBuilder("git", "merge", "--no-commit", "--no-ff", branchName)
+                .directory(projectDir)
+                .start()
+            val mergeExitCode = mergeProcess.waitFor()
+            
+            // Abort the merge regardless of result
+            ProcessBuilder("git", "merge", "--abort")
+                .directory(projectDir)
+                .start()
+                .waitFor()
+            
+            if (mergeExitCode != 0) {
+                val errorOutput = BufferedReader(InputStreamReader(mergeProcess.errorStream)).use { it.readText() }
+                logger.warn("Potential merge conflict detected: $errorOutput")
+                GitOperationResult(
+                    success = false,
+                    errorMessage = "Potential merge conflict detected with branch '$branchName'. " +
+                        "This may cause issues when merging to '$currentBranch'. " +
+                        "Conflict details: ${errorOutput.take(MAX_ERROR_MESSAGE_LENGTH)}"
+                )
+            } else {
+                GitOperationResult(success = true)
+            }
+        } catch (e: Exception) {
+            logger.warn("Could not check for merge conflicts: ${e.message}")
+            // Don't fail branch creation if conflict check fails
+            GitOperationResult(success = true)
         }
     }
 
