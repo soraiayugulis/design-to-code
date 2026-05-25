@@ -89,6 +89,13 @@ jobs:
           fi
           echo "Configuration file validated: $CONFIG_PATH"
       
+      - name: Validate YAML syntax
+        if: inputs.config_path != ''
+        run: |
+          CONFIG_PATH="${{ inputs.config_path }}"
+          python3 -c "import yaml; yaml.safe_load(open('$CONFIG_PATH'))"
+          echo "YAML syntax validated successfully"
+      
       - name: Build project
         run: |
           ./gradlew build -x test
@@ -155,7 +162,8 @@ jobs:
             ### 📦 Artifacts
             - [Generated Code](${artifactsUrl}) - Kotlin and Java files generated from design specs
             - [Coverage Reports](${artifactsUrl}) - Kover and JaCoCo coverage reports
-            - [Test Results](${artifactsUrl}) - Test execution results (if available)
+            - [Test Results](${artifactsUrl}) - Test execution results
+            - [Detekt Results](${artifactsUrl}) - Static code analysis results
             
             ### 📊 Summary
             - **Workspace**: \`${{ inputs.workspace_path || '.' }}\`
@@ -207,4 +215,35 @@ jobs:
         with:
           name: test-results
           path: build/reports/tests/
+          retention-days: 7
+  
+  lint-generated-code:
+    needs: design-to-code
+    if: needs.design-to-code.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      
+      - name: Download generated code artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-code
+      
+      - name: Run Detekt on generated code
+        run: |
+          ./gradlew detekt
+      
+      - name: Upload Detekt results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detekt-results
+          path: build/reports/detekt/
           retention-days: 7
