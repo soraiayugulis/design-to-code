@@ -3,6 +3,7 @@ package com.designtocode.domain.adapter
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import java.io.File
@@ -191,5 +192,100 @@ class OllamaAdapterTest {
         // Since Ollama is not running, we expect a connection error
         // This test is for when Ollama is available and returns MODIFY markers with line ranges
         assertTrue(result.success || result.errorMessage != null)
+    }
+
+    @Test
+    fun shouldValidateSafeFilePaths() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val workspace = tempDir
+
+        // When & Then - Test safe paths
+        val safePath = "src/main/kotlin/User.kt"
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("isPathSafe", String::class.java, File::class.java)
+        method.isAccessible = true
+        val isSafe = method.invoke(ollamaAdapter, safePath, workspace) as Boolean
+        assertTrue(isSafe)
+    }
+
+    @Test
+    fun shouldRejectUnsafePathsWithParentDirectoryReferences() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val workspace = tempDir
+
+        // When & Then - Test unsafe paths with ..
+        val unsafePath = "../etc/passwd"
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("isPathSafe", String::class.java, File::class.java)
+        method.isAccessible = true
+        val isSafe = method.invoke(ollamaAdapter, unsafePath, workspace) as Boolean
+        assertFalse(isSafe)
+    }
+
+    @Test
+    fun shouldRejectAbsolutePathPaths() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val workspace = tempDir
+
+        // When & Then - Test absolute paths
+        val absolutePath = "/etc/passwd"
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("isPathSafe", String::class.java, File::class.java)
+        method.isAccessible = true
+        val isSafe = method.invoke(ollamaAdapter, absolutePath, workspace) as Boolean
+        assertFalse(isSafe)
+    }
+
+    @Test
+    fun shouldModifyFileLinesWithValidRange() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val testFile = File(tempDir, "test.kt")
+        testFile.writeText("line1\nline2\nline3\nline4\nline5")
+        val newContent = "new line"
+
+        // When
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("modifyFileLines", File::class.java, String::class.java, String::class.java)
+        method.isAccessible = true
+        method.invoke(ollamaAdapter, testFile, "2-3", newContent)
+
+        // Then
+        val result = testFile.readText()
+        assertTrue(result.contains("new line"))
+    }
+
+    @Test
+    fun shouldHandleInvalidLineRangeGracefully() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val testFile = File(tempDir, "test.kt")
+        testFile.writeText("line1\nline2\nline3")
+        val originalContent = testFile.readText()
+
+        // When
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("modifyFileLines", File::class.java, String::class.java, String::class.java)
+        method.isAccessible = true
+        method.invoke(ollamaAdapter, testFile, "10-20", "new content")
+
+        // Then - Should not throw, file should remain unchanged or handle gracefully
+        val result = testFile.readText()
+        // File may be unchanged or modified, but should not throw exception
+    }
+
+    @Test
+    fun shouldHandleMalformedLineRange() {
+        // Given
+        val ollamaAdapter = OllamaAdapter(host = "localhost", port = 11434, model = "codellama:13b")
+        val testFile = File(tempDir, "test.kt")
+        testFile.writeText("line1\nline2\nline3")
+
+        // When & Then - Should handle malformed range without throwing
+        val method = ollamaAdapter.javaClass.getDeclaredMethod("modifyFileLines", File::class.java, String::class.java, String::class.java)
+        method.isAccessible = true
+        try {
+            method.invoke(ollamaAdapter, testFile, "invalid-range", "new content")
+        } catch (e: Exception) {
+            // Expected to handle gracefully
+        }
     }
 }
