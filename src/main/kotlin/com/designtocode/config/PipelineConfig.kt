@@ -4,7 +4,8 @@ data class PipelineConfig(
     val ai: AIConfig,
     val git: GitConfig,
     val qualityGate: QualityGateConfig,
-    val build: BuildConfig
+    val build: BuildConfig,
+    val retry: RetryConfig = RetryConfig()
 )
 
 data class AIConfig(
@@ -28,4 +29,11 @@ data class QualityGateConfig(
 data class BuildConfig(
     val gradleTasks: List<String> = listOf("clean", "build"),
     val useDaemon: Boolean = false
+)
+
+data class RetryConfig(
+    val maxAttempts: Int = 3,
+    val initialDelayMs: Long = 1000L,
+    val maxDelayMs: Long = 10000L,
+    val backoffMultiplier: Double = 2.0
 )

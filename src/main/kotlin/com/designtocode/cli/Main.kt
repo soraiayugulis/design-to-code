@@ -81,7 +81,8 @@ class DesignToCodeCommand : Callable<Int> {
                 ai = com.designtocode.config.AIConfig(),
                 git = com.designtocode.config.GitConfig(),
                 qualityGate = com.designtocode.config.QualityGateConfig(),
-                build = com.designtocode.config.BuildConfig()
+                build = com.designtocode.config.BuildConfig(),
+                retry = com.designtocode.config.RetryConfig()
             )
         }
     }
