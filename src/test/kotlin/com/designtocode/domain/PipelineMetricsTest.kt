@@ -281,7 +281,7 @@ class MetricsCollectorTest {
 
         // When
         val success = collector.recordStage(metrics, "Test Stage") {
-            throw RuntimeException("Test error")
+            throw IllegalStateException("Test error")
         }
 
         // Then
