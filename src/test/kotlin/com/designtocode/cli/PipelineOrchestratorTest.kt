@@ -297,10 +297,11 @@ class PipelineOrchestratorTest {
         // When - Use reflection to test private method
         val contextMethod = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
         contextMethod.isAccessible = true
-        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
+        contextMethod.invoke(orchestrator)
         
         val promptMethod = orchestrator.javaClass.getDeclaredMethod("executePromptConstruction", com.designtocode.domain.model.ProjectContext::class.java)
         promptMethod.isAccessible = true
+        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
         promptMethod.invoke(orchestrator, context)
         
         val qualityMethod = orchestrator.javaClass.getDeclaredMethod("executeQualityGateValidation")

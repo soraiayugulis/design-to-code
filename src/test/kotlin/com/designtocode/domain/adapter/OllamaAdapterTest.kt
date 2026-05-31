@@ -192,4 +192,5 @@ class OllamaAdapterTest {
         // This test is for when Ollama is available and returns MODIFY markers with line ranges
         assertTrue(result.success || result.errorMessage != null)
     }
+
 }
