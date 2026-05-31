@@ -1,7 +1,7 @@
-# Design-to-Code AI Pipeline - Incremental Code Generation with Diff-Based Optimization
-## Status: In Progress
+# Design-to-Code AI Pipeline - Step-by-Step Implementation Plan
+## Status: In Planning
 ## Commit Authorization: Not Authorized
-## Specification: @docs/spec/spec-context.md
+## Specification: @docs/adr/spec-incremental-code-generation.md
 ## Agent Instructions: use @workflow:new-feature-sdd and @rules:cascade-response-spec
 
 This document provides a detailed, phased implementation plan for adding incremental code generation capability to the Design-to-Code AI Pipeline. Instead of regenerating entire codebases, the system will parse specification diffs and generate only the affected code, reducing execution time, minimizing merge conflicts, and preserving manually written code.
@@ -9,44 +9,7 @@ This document provides a detailed, phased implementation plan for adding increme
 ---
 
 ## Implementation Phases Overview
-
-### Phase 0: Diff Parsing & Change Detection (High Priority)
-**Objective:** Implement diff parsing logic to identify changes in specification files and determine affected code sections.
-
-**Dependencies:** None
-**Branch:** `feature/diff-parsing-change-detection`
-
-### Phase 1: Impact Analysis Engine (High Priority)
-**Objective:** Create an impact analysis engine that maps specification changes to affected code files and components.
-
-**Dependencies:** Phase 0
-**Branch:** `feature/impact-analysis-engine`
-
-### Phase 2: Incremental Prompt Construction (High Priority)
-**Objective:** Implement prompt construction that generates only for affected code sections, preserving existing code.
-
-**Dependencies:** Phase 1
-**Branch:** `feature/incremental-prompt-construction`
-
-### Phase 3: Selective Code Generation (High Priority)
-**Objective:** Update AI generation to apply changes selectively without regenerating entire files.
-
-**Dependencies:** Phase 2
-**Branch:** `feature/selective-code-generation`
-
-### Phase 4: Conflict Detection & Resolution (Medium Priority)
-**Objective:** Add conflict detection for incremental changes and provide resolution strategies.
-
-**Dependencies:** Phase 3
-**Branch:** `feature/conflict-detection-resolution`
-
-### Phase 5: CI/CD Integration & Configuration (High Priority)
-**Objective:** Integrate incremental generation into pipeline with configuration options.
-
-**Dependencies:** Phase 4
-**Branch:** `feature/incremental-generation-ci-cd`
-
----
+See @docs/adr/spec-incremental-code-generation.md for detailed phase descriptions.
 
 ## Phase 0: Diff Parsing & Change Detection
 
@@ -635,6 +598,7 @@ This document provides a detailed, phased implementation plan for adding increme
 - Provide fallback to full generation on failures
 - Monitor for regressions after each phase
 - Keep phases small and focused
+- Add feature flags to enable/disable incremental generation
 - Implement conflict detection to prevent data loss
 - Add manual review step for unresolvable conflicts
 
