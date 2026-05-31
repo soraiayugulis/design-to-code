@@ -165,4 +165,199 @@ class ConfigLoaderTest {
         // Then
         assertEquals(null, config)
     }
+
+    @Test
+    fun shouldThrowExceptionWhenCoverageThresholdBelowMinimum() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate:
+              coverageThreshold: -10.0
+            build: {}
+        """.trimIndent())
+
+        // When & Then
+        val exception = assertFailsWith<ConfigException> {
+            configLoader.loadConfig(configFile)
+        }
+        assertTrue(exception.message?.contains("Coverage threshold must be between 0.0 and 100.0") == true)
+    }
+
+    @Test
+    fun shouldParseRetryConfigWithCustomValues() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate: {}
+            build: {}
+            retry:
+              maxAttempts: 5
+              initialDelayMs: 2000
+              maxDelayMs: 20000
+              backoffMultiplier: 3.0
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals(5, config.retry.maxAttempts)
+        assertEquals(2000L, config.retry.initialDelayMs)
+        assertEquals(20000L, config.retry.maxDelayMs)
+        assertEquals(3.0, config.retry.backoffMultiplier)
+    }
+
+    @Test
+    fun shouldParseBuildConfigWithCustomTasks() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate: {}
+            build:
+              gradleTasks:
+                - clean
+                - build
+                - test
+              useDaemon: true
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals(listOf("clean", "build", "test"), config.build.gradleTasks)
+        assertEquals(true, config.build.useDaemon)
+    }
+
+    @Test
+    fun shouldParseGitConfigWithCustomValues() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git:
+              branchPrefix: feature/custom
+              commitMessageFormat: custom
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals("feature/custom", config.git.branchPrefix)
+        assertEquals("custom", config.git.commitMessageFormat)
+    }
+
+    @Test
+    fun shouldParseAIConfigWithCustomValues() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai:
+              host: custom-host
+              port: 9999
+              model: custom-model
+              timeoutMs: 600000
+            git: {}
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals("custom-host", config.ai.host)
+        assertEquals(9999, config.ai.port)
+        assertEquals("custom-model", config.ai.model)
+        assertEquals(600000L, config.ai.timeoutMs)
+    }
+
+    @Test
+    fun shouldParseQualityGateConfigWithCustomValues() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate:
+              coverageThreshold: 85.0
+              coverageType: BRANCH
+              timeoutSeconds: 1200
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals(85.0, config.qualityGate.coverageThreshold)
+        assertEquals("BRANCH", config.qualityGate.coverageType)
+        assertEquals(1200L, config.qualityGate.timeoutSeconds)
+    }
+
+    @Test
+    fun shouldHandleMalformedYamlFile() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            invalid: yaml: content:
+              - broken
+        """.trimIndent())
+
+        // When & Then
+        assertFailsWith<ConfigException> {
+            configLoader.loadConfig(configFile)
+        }
+    }
+
+    @Test
+    fun shouldHandleEmptyYamlFile() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("")
+
+        // When & Then
+        assertFailsWith<ConfigException> {
+            configLoader.loadConfig(configFile)
+        }
+    }
+
+    @Test
+    fun shouldUseDefaultRetryConfigWhenNotSpecified() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals(3, config.retry.maxAttempts)
+        assertEquals(1000L, config.retry.initialDelayMs)
+        assertEquals(10000L, config.retry.maxDelayMs)
+        assertEquals(2.0, config.retry.backoffMultiplier)
+    }
 }
