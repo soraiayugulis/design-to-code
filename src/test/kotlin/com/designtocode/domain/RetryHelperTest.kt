@@ -55,7 +55,7 @@ class RetryHelperTest {
             operation = {
                 attemptCount++
                 if (attemptCount < 2) {
-                    throw RuntimeException("timeout error")
+                    error("timeout error")
                 }
                 "success"
             }
@@ -84,7 +84,7 @@ class RetryHelperTest {
             operationName = "Test Operation",
             operation = {
                 attemptCount++
-                throw RuntimeException("timeout error")
+                error("timeout error")
             }
         )
 
@@ -111,7 +111,7 @@ class RetryHelperTest {
             operationName = "Test Operation",
             operation = {
                 attemptCount++
-                throw RuntimeException("permanent error")
+                throw IllegalArgumentException("permanent error")
             },
             isTransientFailure = { it.message?.contains("timeout") == true }
         )
@@ -139,7 +139,7 @@ class RetryHelperTest {
             operation = {
                 attemptCount++
                 if (attemptCount < 2) {
-                    throw RuntimeException("custom error")
+                    error("custom error")
                 }
                 "success"
             },
@@ -171,7 +171,7 @@ class RetryHelperTest {
                 timestamps.add(System.currentTimeMillis())
                 attemptCount++
                 if (attemptCount < 3) {
-                    throw RuntimeException("timeout error")
+                    error("timeout error")
                 }
                 "success"
             }
@@ -206,7 +206,7 @@ class RetryHelperTest {
             operation = {
                 attemptCount++
                 if (attemptCount < 5) {
-                    throw RuntimeException("timeout error")
+                    error("timeout error")
                 }
                 "success"
             }
@@ -232,7 +232,7 @@ class RetryHelperTest {
         val result = retryHelper.retryWithBackoff(
             operationName = "Test Operation",
             operation = {
-                throw RuntimeException(null as String?)
+                error("test error")
             }
         )
 
@@ -254,19 +254,19 @@ class RetryHelperTest {
         // When - Test various transient failure messages
         val timeoutResult = retryHelper.retryWithBackoff(
             operationName = "Test",
-            operation = { throw RuntimeException("timeout") }
+            operation = { error("timeout") }
         )
         val connectionResult = retryHelper.retryWithBackoff(
             operationName = "Test",
-            operation = { throw RuntimeException("connection failed") }
+            operation = { error("connection failed") }
         )
         val networkResult = retryHelper.retryWithBackoff(
             operationName = "Test",
-            operation = { throw RuntimeException("network error") }
+            operation = { error("network error") }
         )
         val http503Result = retryHelper.retryWithBackoff(
             operationName = "Test",
-            operation = { throw RuntimeException("HTTP 503") }
+            operation = { error("HTTP 503") }
         )
 
         // Then - All should retry (fail after max attempts)

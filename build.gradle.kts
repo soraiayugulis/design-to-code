@@ -69,3 +69,13 @@ detekt {
     allRules = false
     config.setFrom("$projectDir/config/detekt/detekt.yml")
 }
+
+koverReport {
+    defaults {
+        verify {
+            rule {
+                minBound(80)
+            }
+        }
+    }
+}

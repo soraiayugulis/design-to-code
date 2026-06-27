@@ -54,7 +54,7 @@ class ConfigLoader {
             host = aiMap["host"] as? String ?: "localhost",
             port = aiMap["port"] as? Int ?: 11434,
             model = aiMap["model"] as? String ?: "codellama:13b",
-            timeoutMs = aiMap["timeoutMs"] as? Long ?: 300000L
+            timeoutMs = (aiMap["timeoutMs"] as? Int)?.toLong() ?: aiMap["timeoutMs"] as? Long ?: 300000L
         )
     }
 
@@ -66,7 +66,9 @@ class ConfigLoader {
     }
 
     private fun parseQualityGateConfig(qualityGateMap: Map<String, Any>): QualityGateConfig {
-        val coverageThreshold = qualityGateMap["coverageThreshold"] as? Double ?: MAX_COVERAGE_THRESHOLD
+        val coverageThreshold = (qualityGateMap["coverageThreshold"] as? Int)?.toDouble() 
+            ?: qualityGateMap["coverageThreshold"] as? Double 
+            ?: MAX_COVERAGE_THRESHOLD
         if (coverageThreshold < MIN_COVERAGE_THRESHOLD || coverageThreshold > MAX_COVERAGE_THRESHOLD) {
             throw ConfigException("Coverage threshold must be between $MIN_COVERAGE_THRESHOLD and $MAX_COVERAGE_THRESHOLD")
         }
@@ -74,7 +76,7 @@ class ConfigLoader {
         return QualityGateConfig(
             coverageThreshold = coverageThreshold,
             coverageType = qualityGateMap["coverageType"] as? String ?: "LINE",
-            timeoutSeconds = qualityGateMap["timeoutSeconds"] as? Long ?: 900L
+            timeoutSeconds = (qualityGateMap["timeoutSeconds"] as? Int)?.toLong() ?: qualityGateMap["timeoutSeconds"] as? Long ?: 900L
         )
     }
 
@@ -93,9 +95,9 @@ class ConfigLoader {
     private fun parseRetryConfig(retryMap: Map<String, Any>): RetryConfig {
         return RetryConfig(
             maxAttempts = retryMap["maxAttempts"] as? Int ?: 3,
-            initialDelayMs = retryMap["initialDelayMs"] as? Long ?: 1000L,
-            maxDelayMs = retryMap["maxDelayMs"] as? Long ?: 10000L,
-            backoffMultiplier = retryMap["backoffMultiplier"] as? Double ?: 2.0
+            initialDelayMs = (retryMap["initialDelayMs"] as? Int)?.toLong() ?: retryMap["initialDelayMs"] as? Long ?: 1000L,
+            maxDelayMs = (retryMap["maxDelayMs"] as? Int)?.toLong() ?: retryMap["maxDelayMs"] as? Long ?: 10000L,
+            backoffMultiplier = (retryMap["backoffMultiplier"] as? Int)?.toDouble() ?: retryMap["backoffMultiplier"] as? Double ?: 2.0
         )
     }
 }
