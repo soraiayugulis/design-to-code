@@ -150,9 +150,18 @@ jobs:
               ? `${passedTests} passed, ${tests.failures + tests.errors} failed, ${tests.skipped} skipped`
               : '—';
             const detektDetails = detektIssues === null ? '—' : `${detektIssues} issue(s)`;
-            const coverageDetails = coverage ? `${coverage.pct}% lines (threshold 80%)` : '—';
 
-            const allGreen = Object.values(outcomes).every((o) => o === 'success');
+            // Coverage gate: alert when below the 80% threshold.
+            const COVERAGE_THRESHOLD = 80;
+            const coverageBelow = coverage ? Number(coverage.pct) < COVERAGE_THRESHOLD : false;
+            const coverageDetails = coverage
+              ? `${coverage.pct}% lines (threshold ${COVERAGE_THRESHOLD}%)`
+              : '—';
+            const coverageIcon =
+              outcomes.kover !== 'success' ? '❌' : !coverage ? '⚠️' : coverageBelow ? '⚠️' : '✅';
+
+            const allGreen =
+              Object.values(outcomes).every((o) => o === 'success') && !coverageBelow;
             const title = allGreen ? 'PR Validation Passed ✅' : 'PR Validation Failed ❌';
 
             const body = [
@@ -163,7 +172,7 @@ jobs:
               '| --- | :---: | --- |',
               `| Tests | ${icon(outcomes.tests)} | ${testDetails} |`,
               `| Detekt | ${icon(outcomes.detekt)} | ${detektDetails} |`,
-              `| Coverage | ${icon(outcomes.kover)} | ${coverageDetails} |`,
+              `| Coverage | ${coverageIcon} | ${coverageDetails} |`,
               '',
               `**Branch:** \`${{ github.head_ref }}\` · **Commit:** \`${context.payload.pull_request.head.sha.slice(0, 7)}\``,
               '',
