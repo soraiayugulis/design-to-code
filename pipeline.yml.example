@@ -1,0 +1,29 @@
+# Design-to-Code pipeline configuration example.
+# Copy to pipeline.yml in the target workspace root (or pass via --config).
+
+ai:
+  host: localhost
+  port: 11434
+  model: codellama:13b
+  timeoutMs: 300000
+
+git:
+  branchPrefix: feature/ai-gen
+  commitMessageFormat: conventional
+
+qualityGate:
+  coverageThreshold: 90.0
+  coverageType: LINE
+  timeoutSeconds: 900
+
+build:
+  gradleTasks:
+    - clean
+    - build
+  useDaemon: false
+
+retry:
+  maxAttempts: 3
+  initialDelayMs: 1000
+  maxDelayMs: 10000
+  backoffMultiplier: 2.0
