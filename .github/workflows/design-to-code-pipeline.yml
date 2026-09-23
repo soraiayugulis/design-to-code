@@ -40,7 +40,7 @@ jobs:
           - 11434:11434
         options: >-
           --name ollama
-          --health-cmd /usr/bin/ollama serve
+          --health-cmd "ollama list"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
