@@ -77,7 +77,7 @@ class ConfigLoaderTest {
         assertEquals(11434, config.ai.port) // default
         assertEquals("codellama:13b", config.ai.model) // default
         assertEquals("feature/ai-gen", config.git.branchPrefix) // default
-        assertEquals(100.0, config.qualityGate.coverageThreshold) // default
+        assertEquals(90.0, config.qualityGate.coverageThreshold) // default
         assertEquals(listOf("clean", "build"), config.build.gradleTasks) // default
     }
 

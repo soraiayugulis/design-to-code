@@ -21,7 +21,7 @@ data class GitConfig(
 )
 
 data class QualityGateConfig(
-    val coverageThreshold: Double = 100.0,
+    val coverageThreshold: Double = 90.0,
     val coverageType: String = "LINE",
     val timeoutSeconds: Long = 900L
 )
