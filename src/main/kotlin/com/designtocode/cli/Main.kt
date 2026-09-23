@@ -28,6 +28,7 @@ class DesignToCodeCommand : Callable<Int> {
     @Parameters(
         index = "1",
         arity = "0..*",
+        split = ",",
         description = ["Comma-separated list of changed spec files (optional)"],
         paramLabel = "changedFiles"
     )
