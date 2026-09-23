@@ -188,8 +188,11 @@ class QualityGateValidator(
         // Look for patterns like "x issues found" or "Detekt found x issues"
         val issuesFoundRegex = Regex("""(\d+) issues? found""")
         val detektFoundRegex = Regex("""Detekt found (\d+) issues""")
+        val weightedIssuesRegex = Regex("""(\d+) weighted issues?""")
         
-        val match = issuesFoundRegex.find(output) ?: detektFoundRegex.find(output)
+        val match = issuesFoundRegex.find(output)
+            ?: detektFoundRegex.find(output)
+            ?: weightedIssuesRegex.find(output)
         
         if (match != null) {
             return match.groupValues[1].toInt()
