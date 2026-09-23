@@ -27,7 +27,8 @@ data class PipelineDependencies(
     val aiAgent: AIAgentPort? = null,
     val gitOperations: GitOperationsPort? = null,
     val qualityGate: QualityGatePort? = null,
-    val metricsOutputPath: String? = null
+    val metricsOutputPath: String? = null,
+    val dryRun: Boolean = false
 )
 
 class PipelineOrchestrator(
@@ -72,10 +73,14 @@ class PipelineOrchestrator(
                 return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
             }
             
-            val gitResult = runStage(metrics, "Git Operations", { it.success }) { executeGitOperations(qualityResult) }
-            if (!gitResult.success) {
-                completeAndExport(metrics, false)
-                return@runBlocking gitResult
+            if (dependencies.dryRun) {
+                logger.info("[Stage 6] Git Operations & PR Creation skipped (dry-run mode)")
+            } else {
+                val gitResult = runStage(metrics, "Git Operations", { it.success }) { executeGitOperations(qualityResult) }
+                if (!gitResult.success) {
+                    completeAndExport(metrics, false)
+                    return@runBlocking gitResult
+                }
             }
             
             completeAndExport(metrics, true)

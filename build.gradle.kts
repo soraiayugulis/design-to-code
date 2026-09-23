@@ -71,6 +71,10 @@ tasks.jar {
     manifest {
         attributes("Main-Class" to "com.designtocode.cli.MainKt")
     }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from({
+        configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }
+    })
 }
 
 detekt {
