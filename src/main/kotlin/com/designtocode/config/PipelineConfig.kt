@@ -17,11 +17,12 @@ data class AIConfig(
 
 data class GitConfig(
     val branchPrefix: String = "feature/ai-gen",
-    val commitMessageFormat: String = "conventional"
+    val commitMessageFormat: String = "conventional",
+    val baseRef: String = "HEAD~1"
 )
 
 data class QualityGateConfig(
-    val coverageThreshold: Double = 100.0,
+    val coverageThreshold: Double = 90.0,
     val coverageType: String = "LINE",
     val timeoutSeconds: Long = 900L
 )

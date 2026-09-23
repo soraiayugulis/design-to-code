@@ -6,375 +6,235 @@ import com.designtocode.config.GitConfig
 import com.designtocode.config.PipelineConfig
 import com.designtocode.config.QualityGateConfig
 import com.designtocode.config.RetryConfig
+import com.designtocode.domain.model.QualityGateResult
+import com.designtocode.domain.port.AIAgentPort
+import com.designtocode.domain.port.GenerationResult
+import com.designtocode.domain.port.GitOperationResult
+import com.designtocode.domain.port.GitOperationsPort
+import com.designtocode.domain.port.QualityGatePort
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
 import java.io.File
+import java.util.concurrent.TimeUnit
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
+import org.junit.jupiter.api.Assumptions.assumeTrue
 
 class PipelineOrchestratorTest {
 
     @TempDir
-    lateinit var tempDir: File
+    lateinit var workspace: File
+
+    private val fastRetry = RetryConfig(maxAttempts = 3, initialDelayMs = 1L, maxDelayMs = 5L, backoffMultiplier = 1.0)
+    private val testConfig = PipelineConfig(
+        ai = AIConfig(),
+        git = GitConfig(),
+        qualityGate = QualityGateConfig(),
+        build = BuildConfig(),
+        retry = fastRetry
+    )
+
+    @BeforeEach
+    fun setUp() {
+        File(workspace, "build.gradle.kts").writeText("plugins { id(\"org.springframework.boot\") }")
+        File(workspace, "design").mkdirs()
+        File(workspace, "design/openapi.yaml").writeText("paths:\n  /users:\n    get:\n      summary: Get users\n")
+    }
 
     @Test
-    fun shouldExecuteContextAnalysisStage() {
+    fun shouldCompletePipelineEndToEnd() {
         // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("""
-            dependencies {
-                implementation("org.springframework.boot:spring-boot-starter:3.2.0")
-            }
-        """.trimIndent())
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
+        val aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))))
+        val gitOps = FakeGitOperations()
+        val qualityGate = FakeQualityGate(passedResult())
 
-        // When - Use reflection to test private method
-        val method = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        method.isAccessible = true
-        val context = method.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
+        // When
+        val result = orchestrator(aiAgent, gitOps, qualityGate).execute()
 
         // Then
-        assertNotNull(context)
-        assertTrue(context.techStack.name.isNotEmpty())
+        assertTrue(result.success)
+        assertEquals(1, aiAgent.calls)
+        assertTrue(aiAgent.lastPrompt!!.contains("## Project Context"))
+        assertTrue(aiAgent.lastPrompt!!.contains("openapi.yaml"))
+        assertEquals(listOf("createFeatureBranch", "commitChanges", "createPullRequest"), gitOps.calls)
     }
 
     @Test
-    fun shouldExecutePromptConstructionStage() {
+    fun shouldRetryTransientAiFailure() {
         // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val rulesDir = File(workspace, "rules")
-        rulesDir.mkdirs()
-        val globalRules = File(rulesDir, "global-rules.md")
-        globalRules.writeText("# Global Rules")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
+        val aiAgent = FakeAiAgent(
+            listOf(
+                GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "connection timeout"),
+                GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))
+            )
         )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = listOf("spec.yaml"),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
+        val gitOps = FakeGitOperations()
 
-        // When - Create context first
-        val contextMethod = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        contextMethod.isAccessible = true
-        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
-        
-        // Then - Test prompt construction
-        val promptMethod = orchestrator.javaClass.getDeclaredMethod("executePromptConstruction", com.designtocode.domain.model.ProjectContext::class.java)
-        promptMethod.isAccessible = true
-        val prompt = promptMethod.invoke(orchestrator, context) as String
+        // When
+        val result = orchestrator(aiAgent, gitOps, FakeQualityGate(passedResult())).execute()
 
         // Then
-        assertNotNull(prompt)
-        assertTrue(prompt.isNotEmpty())
+        assertTrue(result.success)
+        assertEquals(2, aiAgent.calls)
     }
 
     @Test
-    fun shouldHandleMissingBuildFileInContextAnalysis() {
+    fun shouldNotRetryNonTransientAiError() {
         // Given
-        val workspace = tempDir
-        // Create empty build file to avoid FileNotFoundException
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
+        val aiAgent = FakeAiAgent(
+            listOf(GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "invalid model name"))
         )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
+        val gitOps = FakeGitOperations()
 
-        // When - Use reflection to test private method
-        val method = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        method.isAccessible = true
-        val context = method.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
-
-        // Then - Should return context with UNKNOWN tech stack
-        assertNotNull(context)
-        assertTrue(context.techStack.name.contains("UNKNOWN", ignoreCase = true))
-    }
-
-    @Test
-    fun shouldHandleMissingRulesDirectoryInPromptConstruction() {
-        // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        // No rules directory
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
-
-        // When - Create context first
-        val contextMethod = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        contextMethod.isAccessible = true
-        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
-        
-        // Then - Test prompt construction
-        val promptMethod = orchestrator.javaClass.getDeclaredMethod("executePromptConstruction", com.designtocode.domain.model.ProjectContext::class.java)
-        promptMethod.isAccessible = true
-        val prompt = promptMethod.invoke(orchestrator, context) as String
-
-        // Then - Should still construct prompt without rules
-        assertNotNull(prompt)
-        assertTrue(prompt.isNotEmpty())
-    }
-
-    @Test
-    fun shouldParseCoverageTypeCorrectly() {
-        // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(coverageType = "BRANCH"),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
-
-        // When - Use reflection to test private method
-        val method = orchestrator.javaClass.getDeclaredMethod("executeQualityGateValidation")
-        method.isAccessible = true
-        val result = method.invoke(orchestrator) as com.designtocode.domain.model.QualityGateResult
+        // When
+        val result = orchestrator(aiAgent, gitOps, FakeQualityGate(passedResult())).execute()
 
         // Then
-        assertNotNull(result)
-        // Result will fail due to no actual coverage, but method should execute
+        assertFalse(result.success)
+        assertNotNull(result.errorMessage)
+        assertEquals(1, aiAgent.calls)
+        assertTrue(gitOps.calls.isEmpty())
     }
 
     @Test
-    fun shouldHandleInvalidCoverageType() {
+    fun shouldFailBeforeGitWhenQualityGateFails() {
         // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(coverageType = "INVALID"),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
+        val aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))))
+        val gitOps = FakeGitOperations()
+        val qualityGate = FakeQualityGate(
+            QualityGateResult(passed = false, buildSuccess = false, coveragePercentage = 0.0, errorMessage = "build failed")
         )
 
-        // When - Use reflection to test private method
-        val method = orchestrator.javaClass.getDeclaredMethod("executeQualityGateValidation")
-        method.isAccessible = true
-        val result = method.invoke(orchestrator) as com.designtocode.domain.model.QualityGateResult
-
-        // Then - Should default to LINE coverage type
-        assertNotNull(result)
-    }
-
-    @Test
-    fun shouldGenerateBranchNameWithPrefix() {
-        // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(branchPrefix = "custom/prefix"),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
-
-        // When - Use reflection to test private method
-        val contextMethod = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        contextMethod.isAccessible = true
-        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
-        
-        val promptMethod = orchestrator.javaClass.getDeclaredMethod("executePromptConstruction", com.designtocode.domain.model.ProjectContext::class.java)
-        promptMethod.isAccessible = true
-        promptMethod.invoke(orchestrator, context)
-        
-        val qualityMethod = orchestrator.javaClass.getDeclaredMethod("executeQualityGateValidation")
-        qualityMethod.isAccessible = true
-        val qualityResult = qualityMethod.invoke(orchestrator) as com.designtocode.domain.model.QualityGateResult
-        
-        val gitMethod = orchestrator.javaClass.getDeclaredMethod("executeGitOperations", com.designtocode.domain.model.QualityGateResult::class.java)
-        gitMethod.isAccessible = true
-        val gitResult = gitMethod.invoke(orchestrator, qualityResult) as PipelineResult
-
-        // Then - Git operations will fail due to no git repo, but branch naming logic should execute
-        assertNotNull(gitResult)
-    }
-
-    @Test
-    fun shouldUseDefaultBranchPrefixWhenNotSpecified() {
-        // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(), // Default prefix
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
-
-        // When - Use reflection to test private method
-        val contextMethod = orchestrator.javaClass.getDeclaredMethod("executeContextAnalysis")
-        contextMethod.isAccessible = true
-        contextMethod.invoke(orchestrator)
-        
-        val promptMethod = orchestrator.javaClass.getDeclaredMethod("executePromptConstruction", com.designtocode.domain.model.ProjectContext::class.java)
-        promptMethod.isAccessible = true
-        val context = contextMethod.invoke(orchestrator) as com.designtocode.domain.model.ProjectContext
-        promptMethod.invoke(orchestrator, context)
-        
-        val qualityMethod = orchestrator.javaClass.getDeclaredMethod("executeQualityGateValidation")
-        qualityMethod.isAccessible = true
-        val qualityResult = qualityMethod.invoke(orchestrator) as com.designtocode.domain.model.QualityGateResult
-        
-        val gitMethod = orchestrator.javaClass.getDeclaredMethod("executeGitOperations", com.designtocode.domain.model.QualityGateResult::class.java)
-        gitMethod.isAccessible = true
-        val gitResult = gitMethod.invoke(orchestrator, qualityResult) as PipelineResult
+        // When
+        val result = orchestrator(aiAgent, gitOps, qualityGate).execute()
 
         // Then
-        assertNotNull(gitResult)
+        assertFalse(result.success)
+        assertEquals("build failed", result.errorMessage)
+        assertTrue(gitOps.calls.isEmpty())
     }
 
     @Test
-    fun shouldInitializeMetricsCollector() {
-        // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig()
-        )
-        
-        val orchestrator = PipelineOrchestrator(
-            workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
-        )
+    fun shouldIncludeDetectedSpecChangesInPrompt() {
+        // Given a real git repo so the spec-diff stage produces structured changes
+        assumeTrue(gitAvailable())
+        runGit("init", "-b", "main")
+        runGit("config", "user.email", "test@test.com")
+        runGit("config", "user.name", "Test")
+        runGit("add", "-A")
+        runGit("commit", "-m", "base")
+        File(workspace, "design/openapi.yaml").appendText("    post:\n      summary: Create user\n")
+        runGit("add", "-A")
+        runGit("commit", "-m", "spec change")
 
-        // When - Use reflection to access metricsCollector
-        val field = orchestrator.javaClass.getDeclaredField("metricsCollector")
-        field.isAccessible = true
-        val metricsCollector = field.get(orchestrator)
+        val aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))))
+
+        // When
+        val result = orchestrator(aiAgent, FakeGitOperations(), FakeQualityGate(passedResult())).execute()
 
         // Then
-        assertNotNull(metricsCollector)
+        assertTrue(result.success)
+        assertTrue(aiAgent.lastPrompt!!.contains("## Detected Specification Changes"))
+        assertTrue(aiAgent.lastPrompt!!.contains("ADD"))
     }
 
     @Test
-    fun shouldInitializeRetryHelper() {
+    fun shouldExportMetricsFileWhenConfigured() {
         // Given
-        val workspace = tempDir
-        val buildFile = File(workspace, "build.gradle.kts")
-        buildFile.writeText("dependencies {}")
-        
-        val config = PipelineConfig(
-            ai = AIConfig(),
-            git = GitConfig(),
-            qualityGate = QualityGateConfig(),
-            build = BuildConfig(),
-            retry = RetryConfig(maxAttempts = 5)
+        val metricsFile = File(workspace, "metrics.txt")
+        val deps = PipelineDependencies(
+            aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = emptyList()))),
+            gitOperations = FakeGitOperations(),
+            qualityGate = FakeQualityGate(passedResult()),
+            metricsOutputPath = metricsFile.absolutePath
         )
-        
         val orchestrator = PipelineOrchestrator(
             workspacePath = workspace.absolutePath,
-            changedFiles = emptyList(),
-            ollamaModel = "codellama:13b",
-            config = config
+            changedFiles = listOf("design/openapi.yaml"),
+            ollamaModel = "test-model",
+            config = testConfig,
+            dependencies = deps
         )
 
-        // When - Use reflection to access retryHelper
-        val field = orchestrator.javaClass.getDeclaredField("retryHelper")
-        field.isAccessible = true
-        val retryHelper = field.get(orchestrator)
+        // When
+        val result = orchestrator.execute()
 
         // Then
-        assertNotNull(retryHelper)
+        assertTrue(result.success)
+        assertTrue(metricsFile.exists())
+        assertTrue(metricsFile.readText().contains("Pipeline Metrics Export"))
+    }
+
+    private fun orchestrator(aiAgent: AIAgentPort, gitOps: GitOperationsPort, qualityGate: QualityGatePort): PipelineOrchestrator {
+        return PipelineOrchestrator(
+            workspacePath = workspace.absolutePath,
+            changedFiles = listOf("design/openapi.yaml"),
+            ollamaModel = "test-model",
+            config = testConfig,
+            dependencies = PipelineDependencies(aiAgent = aiAgent, gitOperations = gitOps, qualityGate = qualityGate)
+        )
+    }
+
+    private fun passedResult(): QualityGateResult {
+        return QualityGateResult(passed = true, buildSuccess = true, coveragePercentage = 95.0)
+    }
+
+    private fun gitAvailable(): Boolean {
+        return try {
+            ProcessBuilder("git", "--version").start().waitFor(5, TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun runGit(vararg args: String) {
+        val process = ProcessBuilder(listOf("git") + args)
+            .directory(workspace)
+            .redirectErrorStream(true)
+            .start()
+        process.inputStream.bufferedReader().readText()
+        process.waitFor(10, TimeUnit.SECONDS)
+    }
+
+    private class FakeAiAgent(private val results: List<GenerationResult>) : AIAgentPort {
+        var calls = 0
+        var lastPrompt: String? = null
+
+        override suspend fun generate(prompt: String, workspace: File): GenerationResult {
+            lastPrompt = prompt
+            calls++
+            return results.getOrElse(calls - 1) { results.last() }
+        }
+    }
+
+    private class FakeGitOperations : GitOperationsPort {
+        val calls = mutableListOf<String>()
+
+        override fun createFeatureBranch(branchName: String): GitOperationResult {
+            calls.add("createFeatureBranch")
+            return GitOperationResult(success = true)
+        }
+
+        override fun commitChanges(message: String): GitOperationResult {
+            calls.add("commitChanges")
+            return GitOperationResult(success = true)
+        }
+
+        override fun createPullRequest(
+            title: String,
+            description: String,
+            qualityResult: QualityGateResult,
+            metadata: com.designtocode.domain.adapter.PRMetadata
+        ): GitOperationResult {
+            calls.add("createPullRequest")
+            return GitOperationResult(success = true)
+        }
+    }
+
+    private class FakeQualityGate(private val result: QualityGateResult) : QualityGatePort {
+        override fun validate(): QualityGateResult = result
     }
 }

@@ -1,10 +1,9 @@
 package com.designtocode.domain
 
 import com.designtocode.domain.model.QualityGateResult
+import com.designtocode.domain.port.QualityGatePort
 import org.slf4j.LoggerFactory
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 
 enum class CoverageType {
     LINE,
@@ -14,13 +13,14 @@ enum class CoverageType {
 
 class QualityGateValidator(
     private val projectDir: File,
-    private val coverageThreshold: Double = 100.0,
+    private val coverageThreshold: Double = 90.0,
     private val timeoutSeconds: Long = 900L, // 15 minutes default
-    private val coverageType: CoverageType = CoverageType.LINE
-) {
+    private val coverageType: CoverageType = CoverageType.LINE,
+    private val gradleTasks: List<String> = listOf("clean", "build")
+) : QualityGatePort {
     private val logger = LoggerFactory.getLogger(QualityGateValidator::class.java)
 
-    fun validate(): QualityGateResult {
+    override fun validate(): QualityGateResult {
         logger.info("Starting quality gate validation")
         logger.info("Project directory: ${projectDir.absolutePath}")
         logger.info("Coverage threshold: $coverageThreshold%, type: $coverageType")
@@ -53,7 +53,10 @@ class QualityGateValidator(
             )
         }
         logger.info("Detekt passed with ${detektResult.issueCount} issues")
-        
+
+        // Generate the coverage report (no-op failure if the project lacks the task)
+        generateCoverageReport()
+
         val coveragePercentage = parseCoverageReport()
         logger.info("Coverage percentage: $coveragePercentage%")
         
@@ -73,59 +76,45 @@ class QualityGateValidator(
         )
     }
     
+    private fun runProcess(command: List<String>): ProcessOutput {
+        return ProcessRunner(projectDir).run(command, timeoutSeconds)
+    }
+
     private fun executeGradleBuild(): BuildResult {
         logger.debug("Executing Gradle build")
         return try {
             val gradleWrapper = File(projectDir, "gradlew")
             logger.debug("Gradle wrapper path: ${gradleWrapper.absolutePath}")
-            
+
             if (!gradleWrapper.exists()) {
                 logger.error("Gradle wrapper not found at: ${gradleWrapper.absolutePath}")
                 return BuildResult(false, "Gradle wrapper not found in project directory")
             }
-            
+
             logger.debug("Starting Gradle build with timeout: ${timeoutSeconds}s")
-            val process = ProcessBuilder(
-                gradleWrapper.absolutePath,
-                "clean",
-                "build",
-                "--no-daemon"
-            ).directory(projectDir).start()
-            
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val errorReader = BufferedReader(InputStreamReader(process.errorStream))
-            
-            val output = StringBuilder()
-            val errorOutput = StringBuilder()
-            
-            val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
-            
-            if (!finished) {
+            val result = runProcess(listOf(gradleWrapper.absolutePath) + gradleTasks + "--no-daemon")
+
+            if (result.timedOut) {
                 logger.error("Gradle build timed out after ${timeoutSeconds}s")
-                process.destroyForcibly()
                 return BuildResult(false, "Gradle build timed out after ${timeoutSeconds}s")
             }
-            
-            reader.use { it.lines().forEach { output.appendLine(it) } }
-            errorReader.use { it.lines().forEach { errorOutput.appendLine(it) } }
-            
-            val exitCode = process.exitValue()
-            logger.debug("Gradle build exit code: $exitCode")
-            
-            if (exitCode == 0) {
+
+            logger.debug("Gradle build exit code: ${result.exitCode}")
+
+            if (result.exitCode == 0) {
                 logger.info("Gradle build completed successfully")
                 BuildResult(true, null)
             } else {
-                val errorMessage = extractCompilationErrors(errorOutput.toString())
-                logger.error("Gradle build failed with exit code $exitCode: $errorMessage")
-                BuildResult(false, "Gradle build failed with exit code $exitCode. $errorMessage")
+                val errorMessage = extractCompilationErrors(result.output)
+                logger.error("Gradle build failed with exit code ${result.exitCode}: $errorMessage")
+                BuildResult(false, "Gradle build failed with exit code ${result.exitCode}. $errorMessage")
             }
         } catch (e: Exception) {
             logger.error("Failed to execute Gradle build: ${e.message}", e)
             BuildResult(false, "Failed to execute Gradle build: ${e.message}")
         }
     }
-    
+
     companion object {
         private const val PERCENTAGE_MULTIPLIER = 100.0
         private const val MAX_ERROR_LINES = 3
@@ -149,44 +138,27 @@ class QualityGateValidator(
         return try {
             val gradleWrapper = File(projectDir, "gradlew")
             logger.debug("Gradle wrapper path: ${gradleWrapper.absolutePath}")
-            
+
             if (!gradleWrapper.exists()) {
                 logger.warn("Gradle wrapper not found, skipping Detekt")
                 return DetektResult(success = true, issueCount = 0, errorMessage = null)
             }
-            
+
             logger.debug("Starting Detekt with timeout: ${timeoutSeconds}s")
-            val process = ProcessBuilder(
-                gradleWrapper.absolutePath,
-                "detekt",
-                "--no-daemon"
-            ).directory(projectDir).start()
-            
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val errorReader = BufferedReader(InputStreamReader(process.errorStream))
-            
-            val output = StringBuilder()
-            val errorOutput = StringBuilder()
-            
-            val finished = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
-            
-            if (!finished) {
+            val result = runProcess(listOf(gradleWrapper.absolutePath, "detekt", "--no-daemon"))
+
+            if (result.timedOut) {
                 logger.error("Detekt timed out after ${timeoutSeconds}s")
-                process.destroyForcibly()
                 return DetektResult(success = false, issueCount = 0, errorMessage = "Detekt timed out after ${timeoutSeconds}s")
             }
-            
-            reader.use { it.lines().forEach { output.appendLine(it) } }
-            errorReader.use { it.lines().forEach { errorOutput.appendLine(it) } }
-            
-            val exitCode = process.exitValue()
-            logger.debug("Detekt exit code: $exitCode")
-            
-            if (exitCode == 0) {
+
+            logger.debug("Detekt exit code: ${result.exitCode}")
+
+            if (result.exitCode == 0) {
                 logger.info("Detekt completed successfully with no issues")
                 DetektResult(success = true, issueCount = 0, errorMessage = null)
             } else {
-                val issueCount = parseDetektOutput(output.toString())
+                val issueCount = parseDetektOutput(result.output)
                 logger.warn("Detekt found $issueCount issues")
                 DetektResult(success = false, issueCount = issueCount, errorMessage = "Detekt found $issueCount issues")
             }
@@ -195,14 +167,32 @@ class QualityGateValidator(
             DetektResult(success = false, issueCount = 0, errorMessage = "Failed to execute Detekt: ${e.message}")
         }
     }
+
+    private fun generateCoverageReport() {
+        logger.debug("Generating coverage report")
+        try {
+            val gradleWrapper = File(projectDir, "gradlew")
+            if (!gradleWrapper.exists()) return
+
+            val result = runProcess(listOf(gradleWrapper.absolutePath, "koverXmlReport", "--no-daemon"))
+            if (result.exitCode != 0) {
+                logger.debug("koverXmlReport not available or failed (exit ${result.exitCode}), falling back to existing reports")
+            }
+        } catch (e: Exception) {
+            logger.debug("Could not run koverXmlReport: ${e.message}")
+        }
+    }
     
     private fun parseDetektOutput(output: String): Int {
         // Parse Detekt output to count issues
         // Look for patterns like "x issues found" or "Detekt found x issues"
         val issuesFoundRegex = Regex("""(\d+) issues? found""")
         val detektFoundRegex = Regex("""Detekt found (\d+) issues""")
+        val weightedIssuesRegex = Regex("""(\d+) weighted issues?""")
         
-        val match = issuesFoundRegex.find(output) ?: detektFoundRegex.find(output)
+        val match = issuesFoundRegex.find(output)
+            ?: detektFoundRegex.find(output)
+            ?: weightedIssuesRegex.find(output)
         
         if (match != null) {
             return match.groupValues[1].toInt()

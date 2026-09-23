@@ -2,6 +2,9 @@ package com.designtocode.domain.adapter
 
 import com.designtocode.domain.port.AIAgentPort
 import com.designtocode.domain.port.GenerationResult
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -16,13 +19,13 @@ class OllamaAdapter(
 ) : AIAgentPort {
     companion object {
         private const val CONNECTION_TIMEOUT_MS = 5000
-        private const val READ_TIMEOUT_MS = 5000
         private const val HTTP_SUCCESS_CODE = 200
         private const val FILE_PATH_GROUP_INDEX = 2
         private const val FILE_CONTENT_GROUP_INDEX = 3
     }
 
     private val logger = LoggerFactory.getLogger(OllamaAdapter::class.java)
+    private val gson = Gson()
 
     override suspend fun generate(prompt: String, workspace: File): GenerationResult {
         logger.info("Starting AI generation with Ollama")
@@ -56,33 +59,31 @@ class OllamaAdapter(
     private fun callOllamaAPI(prompt: String): OllamaResponse {
         val url = URI.create("http://$host:$port/api/generate").toURL()
         val connection = url.openConnection() as HttpURLConnection
-        
+
         return try {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
             connection.connectTimeout = CONNECTION_TIMEOUT_MS
-            connection.readTimeout = READ_TIMEOUT_MS
-            
-            val requestBody = """
-                {
-                    "model": "$model",
-                    "prompt": "$prompt",
-                    "stream": false
-                }
-            """.trimIndent()
-            
+            connection.readTimeout = timeoutMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+            val requestBody = gson.toJson(JsonObject().apply {
+                addProperty("model", model)
+                addProperty("prompt", prompt)
+                addProperty("stream", false)
+            })
+
             connection.outputStream.use { it.write(requestBody.toByteArray()) }
-            
+
             val responseCode = connection.responseCode
             val responseBody = if (responseCode == HTTP_SUCCESS_CODE) {
                 connection.inputStream.bufferedReader().use { it.readText() }
             } else {
-                connection.errorStream.bufferedReader().use { it.readText() }
+                connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
             }
-            
+
             if (responseCode == HTTP_SUCCESS_CODE) {
-                OllamaResponse(success = true, content = responseBody, error = null)
+                OllamaResponse(success = true, content = extractResponseText(responseBody), error = null)
             } else {
                 OllamaResponse(success = false, content = null, error = "HTTP $responseCode: $responseBody")
             }
@@ -90,6 +91,19 @@ class OllamaAdapter(
             OllamaResponse(success = false, content = null, error = e.message)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun extractResponseText(responseBody: String): String {
+        return try {
+            JsonParser.parseString(responseBody)
+                .asJsonObject
+                .get("response")
+                ?.asString
+                ?: responseBody
+        } catch (e: Exception) {
+            logger.warn("Could not parse Ollama JSON response, using raw body")
+            responseBody
         }
     }
 
@@ -121,7 +135,9 @@ class OllamaAdapter(
                     val file = File(workspace, filePath)
                     if (file.exists()) {
                         // Find the code block after the MODIFY marker
-                        val codeBlockRegex = Regex("""MODIFY:$filePath(?::${lineRange})?\n```(\w+)\n([\s\S]*?)```""")
+                        val escapedPath = Regex.escape(filePath)
+                        val rangePattern = if (lineRange.isNotEmpty()) ":${Regex.escape(lineRange)}" else ""
+                        val codeBlockRegex = Regex("""MODIFY:$escapedPath$rangePattern\n```(\w+)\n([\s\S]*?)```""")
                         val codeMatch = codeBlockRegex.find(content)
                         
                         if (codeMatch != null) {

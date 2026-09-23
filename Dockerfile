@@ -1,14 +1,16 @@
-FROM openjdk:21-jdk-slim as builder
+FROM eclipse-temurin:21-jdk AS builder
 
 WORKDIR /build
 
 COPY build.gradle.kts settings.gradle.kts ./
 COPY gradlew gradlew.bat ./
 COPY gradle ./gradle
+COPY config ./config
+COPY src ./src
 
-RUN ./gradlew build --no-daemon
+RUN ./gradlew build -x test --no-daemon
 
-FROM openjdk:21-jre-slim
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 

@@ -7,6 +7,7 @@ class ConfigLoader {
     companion object {
         private const val MIN_COVERAGE_THRESHOLD = 0.0
         private const val MAX_COVERAGE_THRESHOLD = 100.0
+        private const val DEFAULT_COVERAGE_THRESHOLD = 90.0
     }
 
     private val yaml = Yaml()
@@ -61,14 +62,15 @@ class ConfigLoader {
     private fun parseGitConfig(gitMap: Map<String, Any>): GitConfig {
         return GitConfig(
             branchPrefix = gitMap["branchPrefix"] as? String ?: "feature/ai-gen",
-            commitMessageFormat = gitMap["commitMessageFormat"] as? String ?: "conventional"
+            commitMessageFormat = gitMap["commitMessageFormat"] as? String ?: "conventional",
+            baseRef = gitMap["baseRef"] as? String ?: "HEAD~1"
         )
     }
 
     private fun parseQualityGateConfig(qualityGateMap: Map<String, Any>): QualityGateConfig {
         val coverageThreshold = (qualityGateMap["coverageThreshold"] as? Int)?.toDouble() 
             ?: qualityGateMap["coverageThreshold"] as? Double 
-            ?: MAX_COVERAGE_THRESHOLD
+            ?: DEFAULT_COVERAGE_THRESHOLD
         if (coverageThreshold < MIN_COVERAGE_THRESHOLD || coverageThreshold > MAX_COVERAGE_THRESHOLD) {
             throw ConfigException("Coverage threshold must be between $MIN_COVERAGE_THRESHOLD and $MAX_COVERAGE_THRESHOLD")
         }

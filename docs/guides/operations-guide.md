@@ -42,13 +42,13 @@ jobs:
   pipeline:
     runs-on: ubuntu-latest
     container:
-      image: openjdk:21-jdk
+      image: eclipse-temurin:21
     steps:
       - uses: actions/checkout@v3
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
       - name: Run Pipeline
-        run: ./gradlew run --args="--workspace=$GITHUB_WORKSPACE --changedFiles=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})"
+        run: ./gradlew run --args="$GITHUB_WORKSPACE $(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | tr '\n' ',')"
 ```
 
 #### Option 2: Kubernetes Deployment
@@ -178,6 +178,7 @@ Pipeline ID: exec-123
   Stage Success Rate: 100%
   Stages:
     - Context Analysis: ✅ (5s)
+    - Spec Change Analysis: ✅ (1s)
     - Prompt Construction: ✅ (3s)
     - AI Generation: ✅ (250s)
     - Quality Gate Validation: ✅ (30s)
@@ -212,7 +213,7 @@ Set up alerts for:
 
 - **Pipeline Failure Rate**: Alert if failure rate > 10%
 - **Pipeline Duration**: Alert if duration > 15 minutes
-- **Quality Gate Failures**: Alert if coverage < 100%
+- **Quality Gate Failures**: Alert if coverage is below the configured threshold (default 90%)
 - **Ollama Connection**: Alert if Ollama is unavailable
 
 Example Prometheus alerting rules:
@@ -280,7 +281,7 @@ tar -czf specs-backup.tar.gz openapi/ docs/spec/
 cp pipeline-config.yaml config-backup.yaml
 
 # Export metrics
-./gradlew run --args="--export-metrics"
+./gradlew run --args="--metrics-file /var/log/pipeline-metrics.txt <workspacePath>"
 ```
 
 ### Recovery Procedure

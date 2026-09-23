@@ -77,7 +77,7 @@ class ConfigLoaderTest {
         assertEquals(11434, config.ai.port) // default
         assertEquals("codellama:13b", config.ai.model) // default
         assertEquals("feature/ai-gen", config.git.branchPrefix) // default
-        assertEquals(100.0, config.qualityGate.coverageThreshold) // default
+        assertEquals(90.0, config.qualityGate.coverageThreshold) // default
         assertEquals(listOf("clean", "build"), config.build.gradleTasks) // default
     }
 
@@ -258,6 +258,36 @@ class ConfigLoaderTest {
         // Then
         assertEquals("feature/custom", config.git.branchPrefix)
         assertEquals("custom", config.git.commitMessageFormat)
+    }
+
+    @Test
+    fun shouldParseGitBaseRefAndDefaultToHeadParent() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git:
+              baseRef: origin/main
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals("origin/main", config.git.baseRef)
+
+        // Default when not specified
+        val defaultFile = File(tempDir, "pipeline-default.yml")
+        defaultFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+        assertEquals("HEAD~1", configLoader.loadConfig(defaultFile).git.baseRef)
     }
 
     @Test

@@ -26,7 +26,7 @@ on:
         default: 'codellama:13b'
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 
@@ -40,7 +40,7 @@ jobs:
           - 11434:11434
         options: >-
           --name ollama
-          --health-cmd /usr/bin/ollama serve
+          --health-cmd "ollama list"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -56,6 +56,7 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ inputs.changed_files }}" ]; then
             echo "Using manually provided changed files: ${{ inputs.changed_files }}"
             echo "changed_files=${{ inputs.changed_files }}" >> $GITHUB_OUTPUT
+            echo "base_sha=" >> $GITHUB_OUTPUT
           else
             # Extract changed files from git diff
             if [ "${{ github.event_name }}" == "pull_request" ]; then
@@ -63,6 +64,7 @@ jobs:
             else
               BASE_SHA="HEAD~1"
             fi
+            echo "base_sha=$BASE_SHA" >> $GITHUB_OUTPUT
             
             # Find changed spec files (.yaml, .yml, .md in design/ directory)
             CHANGED_FILES=$(git diff --name-only $BASE_SHA HEAD | grep -E 'design/.*\.(yaml|yml|md)$' || true)
@@ -118,17 +120,24 @@ jobs:
           CHANGED_FILES="${{ steps.changed-files.outputs.changed_files }}"
           CONFIG_PATH="${{ inputs.config_path || '' }}"
           OLLAMA_MODEL="${{ inputs.ollama_model || 'codellama:13b' }}"
+          BASE_SHA="${{ steps.changed-files.outputs.base_sha }}"
+          
+          BASE_REF_ARG=""
+          if [ -n "$BASE_SHA" ]; then
+            BASE_REF_ARG="-b $BASE_SHA"
+          fi
           
           echo "Running pipeline with:"
           echo "  Workspace: $WORKSPACE_PATH"
           echo "  Changed files: $CHANGED_FILES"
           echo "  Config path: $CONFIG_PATH"
           echo "  Ollama model: $OLLAMA_MODEL"
+          echo "  Base ref: ${BASE_SHA:-default (config)}"
           
           if [ -n "$CONFIG_PATH" ]; then
-            ./gradlew run --args="-c $CONFIG_PATH $CHANGED_FILES $WORKSPACE_PATH"
+            ./gradlew run --args="-c $CONFIG_PATH -m $OLLAMA_MODEL $BASE_REF_ARG $WORKSPACE_PATH $CHANGED_FILES"
           else
-            ./gradlew run --args="$CHANGED_FILES $WORKSPACE_PATH"
+            ./gradlew run --args="-m $OLLAMA_MODEL $BASE_REF_ARG $WORKSPACE_PATH $CHANGED_FILES"
           fi
       
       - name: Upload generated code artifacts

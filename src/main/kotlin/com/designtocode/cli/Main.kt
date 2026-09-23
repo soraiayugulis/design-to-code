@@ -2,6 +2,8 @@ package com.designtocode.cli
 
 import com.designtocode.config.ConfigLoader
 import com.designtocode.config.PipelineConfig
+import com.designtocode.validation.EnvironmentValidator
+import com.designtocode.validation.OllamaValidator
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
@@ -28,6 +30,7 @@ class DesignToCodeCommand : Callable<Int> {
     @Parameters(
         index = "1",
         arity = "0..*",
+        split = ",",
         description = ["Comma-separated list of changed spec files (optional)"],
         paramLabel = "changedFiles"
     )
@@ -47,18 +50,38 @@ class DesignToCodeCommand : Callable<Int> {
     )
     private var ollamaModel: String? = null
     
+    @Option(
+        names = ["--metrics-file"],
+        description = ["Optional path to export pipeline metrics"],
+        paramLabel = "metricsFile"
+    )
+    private var metricsFile: String? = null
+    
+    @Option(
+        names = ["-b", "--base-ref"],
+        description = ["Git base ref for spec diff analysis (overrides config git.baseRef)"],
+        paramLabel = "baseRef"
+    )
+    private var baseRef: String? = null
+    
     override fun call(): Int {
         val workspace = File(workspacePath ?: throw IllegalArgumentException("Workspace path is required"))
         val config = loadConfig(configPath, workspace)
         
         val finalChangedFiles = changedFiles ?: emptyList()
         val finalOllamaModel = ollamaModel ?: config.ai.model
+        val effectiveConfig = baseRef?.let { config.copy(git = config.git.copy(baseRef = it)) } ?: config
+
+        if (!runPreflightChecks(effectiveConfig, finalOllamaModel)) {
+            return 1
+        }
 
         val orchestrator = PipelineOrchestrator(
             workspacePath = workspacePath!!,
             changedFiles = finalChangedFiles,
             ollamaModel = finalOllamaModel,
-            config = config
+            config = effectiveConfig,
+            dependencies = PipelineDependencies(metricsOutputPath = metricsFile)
         )
         val result = orchestrator.execute()
 
@@ -71,6 +94,28 @@ class DesignToCodeCommand : Callable<Int> {
         }
     }
     
+    private fun runPreflightChecks(config: PipelineConfig, model: String): Boolean {
+        val gitResult = EnvironmentValidator().validateGit()
+        if (!gitResult.isValid) {
+            println("Pre-flight check failed: ${gitResult.message}")
+            return false
+        }
+
+        val ollamaValidator = OllamaValidator(config.ai.host, config.ai.port)
+        val serviceResult = ollamaValidator.validateService()
+        if (!serviceResult.isAvailable) {
+            println("Pre-flight check failed: ${serviceResult.message}")
+            return false
+        }
+
+        val modelResult = ollamaValidator.validateModel(model)
+        if (!modelResult.isAvailable) {
+            println("Warning: ${modelResult.message}. Run 'ollama pull $model' first.")
+        }
+
+        return true
+    }
+
     private fun loadConfig(configPath: String?, workspace: File): PipelineConfig {
         val configLoader = ConfigLoader()
         

@@ -11,13 +11,15 @@ class EnvironmentValidatorTest {
 
     @Test
     fun shouldValidateJavaVersion() {
+        // Given: expected major version matches the JVM running the tests
+        val expectedMajor = System.getProperty("java.version").substringBefore(".")
+
         // When
         val result = validator.validateJavaVersion()
 
         // Then
         assertNotNull(result)
-        assertNotNull(result.version)
-        assertEquals("21", result.version)
+        assertEquals(expectedMajor, result.version)
     }
 
     @Test
@@ -67,13 +69,40 @@ class EnvironmentValidatorTest {
     }
 
     @Test
-    fun shouldReturnInvalidWhenJavaVersionNot21() {
-        // Given - This test assumes Java 21 is installed
+    fun shouldMarkJavaValidOnlyWhenMajorVersionIs21() {
         // When
         val result = validator.validateJavaVersion()
 
+        // Then: validity must be consistent with the extracted version
+        assertEquals(result.version.startsWith("21"), result.isValid)
+    }
+
+    @Test
+    fun shouldExtractJavaVersionFromShortVersionString() {
+        // Given: some JVMs report a bare major version
+        val output = """openjdk version "21" 2024-01-16"""
+
+        // When
+        val method = validator.javaClass.getDeclaredMethod("extractJavaVersion", String::class.java)
+        method.isAccessible = true
+        val version = method.invoke(validator, output) as String
+
         // Then
-        assertTrue(result.isValid || result.version != "21")
+        assertEquals("21", version)
+    }
+
+    @Test
+    fun shouldExtractJavaVersionFromTwoPartVersionString() {
+        // Given
+        val output = """openjdk version "21.0" 2024-01-16"""
+
+        // When
+        val method = validator.javaClass.getDeclaredMethod("extractJavaVersion", String::class.java)
+        method.isAccessible = true
+        val version = method.invoke(validator, output) as String
+
+        // Then
+        assertEquals("21", version)
     }
 
     @Test

@@ -25,6 +25,9 @@ dependencies {
     
     // YAML parsing
     implementation("org.yaml:snakeyaml:2.2")
+
+    // JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
     
     // CLI
     implementation("info.picocli:picocli:4.7.5")
@@ -62,6 +65,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
 
 application {
     mainClass.set("com.designtocode.cli.MainKt")
+}
+
+tasks.jar {
+    manifest {
+        attributes("Main-Class" to "com.designtocode.cli.MainKt")
+    }
 }
 
 detekt {

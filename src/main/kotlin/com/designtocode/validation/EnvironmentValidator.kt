@@ -144,7 +144,7 @@ class EnvironmentValidator {
 
     private fun extractJavaVersion(output: String?): String {
         if (output == null) return "unknown"
-        val regex = Regex("""version "(\d+\.\d+\.\d+)"""")
+        val regex = Regex("""version "(\d+)(?:\.\d+)*"""")
         val match = regex.find(output)
         return match?.groupValues?.get(1)?.split(".")?.get(0) ?: "unknown"
     }

@@ -1,12 +1,11 @@
 package com.designtocode.domain.adapter
 
+import com.designtocode.domain.ProcessRunner
 import com.designtocode.domain.model.QualityGateResult
 import com.designtocode.domain.port.GitOperationResult
 import com.designtocode.domain.port.GitOperationsPort
 import org.slf4j.LoggerFactory
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 
 data class PRMetadata(
     val labels: List<String> = emptyList(),
@@ -18,14 +17,20 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
     companion object {
         private const val MIN_BRANCH_LENGTH = 8
         private const val MAX_ERROR_MESSAGE_LENGTH = 200
+        private const val COMMAND_TIMEOUT_SECONDS = 60L
     }
 
     private val logger = LoggerFactory.getLogger(GitHubCliAdapter::class.java)
+    private val processRunner = ProcessRunner(projectDir)
+
+    private fun runCommand(vararg command: String): com.designtocode.domain.ProcessOutput {
+        return processRunner.run(command.toList(), COMMAND_TIMEOUT_SECONDS)
+    }
 
     override fun createFeatureBranch(branchName: String): GitOperationResult {
         logger.info("Creating feature branch: $branchName")
         logger.debug("Project directory: ${projectDir.absolutePath}")
-        
+
         if (branchName.isBlank()) {
             logger.error("Branch name cannot be empty")
             return GitOperationResult(success = false, errorMessage = "Branch name cannot be empty")
@@ -33,93 +38,33 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
 
         if (!isValidBranchName(branchName)) {
             logger.error("Invalid branch name format: $branchName")
-            return GitOperationResult(success = false, errorMessage = "Invalid branch name format. Expected: feature/ai-gen-{sha}")
+            return GitOperationResult(success = false, errorMessage = "Invalid branch name format. Expected: <prefix>/<name> (e.g. feature/ai-gen-{sha})")
         }
 
         return try {
             // Check if branch already exists
             logger.debug("Checking if branch already exists")
-            val checkProcess = ProcessBuilder("git", "branch", "--list", branchName)
-                .directory(projectDir)
-                .start()
-            checkProcess.waitFor()
-            
-            if (checkProcess.exitValue() == 0) {
+            val checkResult = runCommand("git", "rev-parse", "--verify", "--quiet", "refs/heads/$branchName")
+            if (checkResult.exitCode == 0) {
                 logger.warn("Branch '$branchName' already exists")
                 return GitOperationResult(success = false, errorMessage = "Branch '$branchName' already exists")
             }
 
-            // Check for potential merge conflicts with target branch
-            logger.debug("Checking for potential merge conflicts")
-            val conflictCheck = checkForMergeConflicts(branchName)
-            if (!conflictCheck.success) {
-                logger.error("Merge conflict detected: ${conflictCheck.errorMessage}")
-                return conflictCheck
-            }
-
             // Create new branch
             logger.debug("Creating new branch")
-            val process = ProcessBuilder("git", "checkout", "-b", branchName)
-                .directory(projectDir)
-                .start()
-            
-            val exitCode = process.waitFor()
-            logger.debug("Branch creation exit code: $exitCode")
-            
-            val result = if (exitCode == 0) {
+            val result = runCommand("git", "checkout", "-b", branchName)
+            logger.debug("Branch creation exit code: ${result.exitCode}")
+
+            if (result.exitCode == 0) {
                 logger.info("Branch created successfully: $branchName")
                 GitOperationResult(success = true)
             } else {
-                val errorOutput = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-                logger.error("Failed to create branch: $errorOutput")
-                GitOperationResult(success = false, errorMessage = "Failed to create branch: $errorOutput")
+                logger.error("Failed to create branch: ${result.output}")
+                GitOperationResult(success = false, errorMessage = "Failed to create branch: ${result.output.take(MAX_ERROR_MESSAGE_LENGTH)}")
             }
-            result
         } catch (e: Exception) {
             logger.error("Failed to create branch: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to create branch: ${e.message}")
-        }
-    }
-
-    private fun checkForMergeConflicts(branchName: String): GitOperationResult {
-        return try {
-            // Get current branch
-            val currentBranchProcess = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
-                .directory(projectDir)
-                .start()
-            val currentBranch = BufferedReader(InputStreamReader(currentBranchProcess.inputStream)).use { it.readText().trim() }
-            currentBranchProcess.waitFor()
-            
-            logger.debug("Current branch: $currentBranch")
-            
-            // Try a dry-run merge to detect conflicts
-            val mergeProcess = ProcessBuilder("git", "merge", "--no-commit", "--no-ff", branchName)
-                .directory(projectDir)
-                .start()
-            val mergeExitCode = mergeProcess.waitFor()
-            
-            // Abort the merge regardless of result
-            ProcessBuilder("git", "merge", "--abort")
-                .directory(projectDir)
-                .start()
-                .waitFor()
-            
-            if (mergeExitCode != 0) {
-                val errorOutput = BufferedReader(InputStreamReader(mergeProcess.errorStream)).use { it.readText() }
-                logger.warn("Potential merge conflict detected: $errorOutput")
-                GitOperationResult(
-                    success = false,
-                    errorMessage = "Potential merge conflict detected with branch '$branchName'. " +
-                        "This may cause issues when merging to '$currentBranch'. " +
-                        "Conflict details: ${errorOutput.take(MAX_ERROR_MESSAGE_LENGTH)}"
-                )
-            } else {
-                GitOperationResult(success = true)
-            }
-        } catch (e: Exception) {
-            logger.warn("Could not check for merge conflicts: ${e.message}")
-            // Don't fail branch creation if conflict check fails
-            GitOperationResult(success = true)
         }
     }
 
@@ -139,43 +84,34 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         return try {
             // Stage all changes
             logger.debug("Staging all changes")
-            val addProcess = ProcessBuilder("git", "add", ".")
-                .directory(projectDir)
-                .start()
-            addProcess.waitFor()
+            val addResult = runCommand("git", "add", ".")
+            if (addResult.exitCode != 0) {
+                logger.error("Failed to stage changes: ${addResult.output}")
+                return GitOperationResult(success = false, errorMessage = "Failed to stage changes: ${addResult.output.take(MAX_ERROR_MESSAGE_LENGTH)}")
+            }
             logger.debug("Changes staged")
-            
+
             // Check if there are changes to commit
             logger.debug("Checking for changes to commit")
-            val statusProcess = ProcessBuilder("git", "status", "--porcelain")
-                .directory(projectDir)
-                .start()
-            val statusOutput = BufferedReader(InputStreamReader(statusProcess.inputStream)).use { it.readText() }
-            statusProcess.waitFor()
-            
-            if (statusOutput.isBlank()) {
+            val statusResult = runCommand("git", "status", "--porcelain")
+
+            if (statusResult.output.isBlank()) {
                 logger.warn("No changes to commit")
                 return GitOperationResult(success = false, errorMessage = "No changes to commit")
             }
 
             // Commit changes
             logger.debug("Committing changes")
-            val commitProcess = ProcessBuilder("git", "commit", "-m", message)
-                .directory(projectDir)
-                .start()
-            
-            val exitCode = commitProcess.waitFor()
-            logger.debug("Commit exit code: $exitCode")
-            
-            val result = if (exitCode == 0) {
+            val result = runCommand("git", "commit", "-m", message)
+            logger.debug("Commit exit code: ${result.exitCode}")
+
+            if (result.exitCode == 0) {
                 logger.info("Changes committed successfully")
                 GitOperationResult(success = true)
             } else {
-                val errorOutput = BufferedReader(InputStreamReader(commitProcess.errorStream)).use { it.readText() }
-                logger.error("Failed to commit: $errorOutput")
-                GitOperationResult(success = false, errorMessage = "Failed to commit: $errorOutput")
+                logger.error("Failed to commit: ${result.output}")
+                GitOperationResult(success = false, errorMessage = "Failed to commit: ${result.output.take(MAX_ERROR_MESSAGE_LENGTH)}")
             }
-            result
         } catch (e: Exception) {
             logger.error("Failed to commit: ${e.message}", e)
             GitOperationResult(success = false, errorMessage = "Failed to commit: ${e.message}")
@@ -212,14 +148,19 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
         return try {
             // Check if gh CLI is installed
             logger.debug("Checking if gh CLI is installed")
-            val checkProcess = ProcessBuilder("gh", "--version")
-                .directory(projectDir)
-                .start()
-            checkProcess.waitFor()
-            
-            if (checkProcess.exitValue() != 0) {
+            val checkResult = runCommand("gh", "--version")
+
+            if (checkResult.exitCode != 0) {
                 logger.error("GitHub CLI (gh) is not installed")
                 return GitOperationResult(success = false, errorMessage = "GitHub CLI (gh) is not installed")
+            }
+
+            // Push current branch to remote so the PR can be created
+            logger.debug("Pushing branch to remote")
+            val pushResult = runCommand("git", "push", "-u", "origin", "HEAD")
+            if (pushResult.exitCode != 0) {
+                logger.error("Failed to push branch: ${pushResult.output}")
+                return GitOperationResult(success = false, errorMessage = "Failed to push branch: ${pushResult.output.take(MAX_ERROR_MESSAGE_LENGTH)}")
             }
 
             // Build gh CLI command with metadata
@@ -227,27 +168,21 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
 
             // Create PR using gh CLI
             logger.debug("Creating PR using gh CLI with command: ${command.joinToString(" ")}")
-            val process = ProcessBuilder(command)
-                .directory(projectDir)
-                .start()
-            
-            val exitCode = process.waitFor()
-            logger.debug("PR creation exit code: $exitCode")
-            
-            if (exitCode == 0) {
+            val result = runCommand(*command.toTypedArray())
+            logger.debug("PR creation exit code: ${result.exitCode}")
+
+            if (result.exitCode == 0) {
                 logger.info("Pull request created successfully with metadata")
                 GitOperationResult(success = true)
             } else {
-                val errorOutput = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-                val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
-                logger.error("Failed to create PR: $errorOutput")
-                
+                logger.error("Failed to create PR: ${result.output}")
+
                 // Check for authentication error
-                if (errorOutput.contains("authentication") || output.contains("authentication")) {
+                if (result.output.contains("authentication")) {
                     logger.error("GitHub CLI authentication failed")
                     GitOperationResult(success = false, errorMessage = "GitHub CLI authentication failed. Run 'gh auth login'")
                 } else {
-                    GitOperationResult(success = false, errorMessage = "Failed to create PR: $errorOutput")
+                    GitOperationResult(success = false, errorMessage = "Failed to create PR: ${result.output.take(MAX_ERROR_MESSAGE_LENGTH)}")
                 }
             }
         } catch (e: Exception) {
@@ -297,10 +232,10 @@ class GitHubCliAdapter(private val projectDir: File) : GitOperationsPort {
     }
 
     private fun isValidBranchName(branchName: String): Boolean {
-        // Validate branch naming convention: feature/ai-gen-{sha}
-        // Allow alphanumeric and hyphens for the SHA part for flexibility
-        // For now, just ensure it's not empty and starts with feature/
-        return branchName.startsWith("feature/") && branchName.length > MIN_BRANCH_LENGTH
+        // Validate branch naming convention: <prefix>/<name> (e.g. feature/ai-gen-{sha})
+        return branchName.matches(Regex("^[\\w.-]+/[\\w./-]+$")) &&
+            branchName.length > MIN_BRANCH_LENGTH &&
+            !branchName.contains("..")
     }
 
     private fun isValidCommitMessage(message: String): Boolean {
