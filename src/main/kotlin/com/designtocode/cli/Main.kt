@@ -2,6 +2,8 @@ package com.designtocode.cli
 
 import com.designtocode.config.ConfigLoader
 import com.designtocode.config.PipelineConfig
+import com.designtocode.validation.EnvironmentValidator
+import com.designtocode.validation.OllamaValidator
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
@@ -55,6 +57,10 @@ class DesignToCodeCommand : Callable<Int> {
         val finalChangedFiles = changedFiles ?: emptyList()
         val finalOllamaModel = ollamaModel ?: config.ai.model
 
+        if (!runPreflightChecks(config, finalOllamaModel)) {
+            return 1
+        }
+
         val orchestrator = PipelineOrchestrator(
             workspacePath = workspacePath!!,
             changedFiles = finalChangedFiles,
@@ -72,6 +78,28 @@ class DesignToCodeCommand : Callable<Int> {
         }
     }
     
+    private fun runPreflightChecks(config: PipelineConfig, model: String): Boolean {
+        val gitResult = EnvironmentValidator().validateGit()
+        if (!gitResult.isValid) {
+            println("Pre-flight check failed: ${gitResult.message}")
+            return false
+        }
+
+        val ollamaValidator = OllamaValidator(config.ai.host, config.ai.port)
+        val serviceResult = ollamaValidator.validateService()
+        if (!serviceResult.isAvailable) {
+            println("Pre-flight check failed: ${serviceResult.message}")
+            return false
+        }
+
+        val modelResult = ollamaValidator.validateModel(model)
+        if (!modelResult.isAvailable) {
+            println("Warning: ${modelResult.message}. Run 'ollama pull $model' first.")
+        }
+
+        return true
+    }
+
     private fun loadConfig(configPath: String?, workspace: File): PipelineConfig {
         val configLoader = ConfigLoader()
         
