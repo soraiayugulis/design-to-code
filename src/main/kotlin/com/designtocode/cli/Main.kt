@@ -57,14 +57,22 @@ class DesignToCodeCommand : Callable<Int> {
     )
     private var metricsFile: String? = null
     
+    @Option(
+        names = ["-b", "--base-ref"],
+        description = ["Git base ref for spec diff analysis (overrides config git.baseRef)"],
+        paramLabel = "baseRef"
+    )
+    private var baseRef: String? = null
+    
     override fun call(): Int {
         val workspace = File(workspacePath ?: throw IllegalArgumentException("Workspace path is required"))
         val config = loadConfig(configPath, workspace)
         
         val finalChangedFiles = changedFiles ?: emptyList()
         val finalOllamaModel = ollamaModel ?: config.ai.model
+        val effectiveConfig = baseRef?.let { config.copy(git = config.git.copy(baseRef = it)) } ?: config
 
-        if (!runPreflightChecks(config, finalOllamaModel)) {
+        if (!runPreflightChecks(effectiveConfig, finalOllamaModel)) {
             return 1
         }
 
@@ -72,7 +80,7 @@ class DesignToCodeCommand : Callable<Int> {
             workspacePath = workspacePath!!,
             changedFiles = finalChangedFiles,
             ollamaModel = finalOllamaModel,
-            config = config,
+            config = effectiveConfig,
             dependencies = PipelineDependencies(metricsOutputPath = metricsFile)
         )
         val result = orchestrator.execute()
