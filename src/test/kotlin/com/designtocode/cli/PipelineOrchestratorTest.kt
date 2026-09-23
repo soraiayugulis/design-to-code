@@ -142,6 +142,35 @@ class PipelineOrchestratorTest {
     }
 
     @Test
+    fun shouldSkipGitOperationsInDryRunMode() {
+        // Given
+        val aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))))
+        val gitOps = FakeGitOperations()
+        val qualityGate = FakeQualityGate(passedResult())
+        val deps = PipelineDependencies(
+            aiAgent = aiAgent,
+            gitOperations = gitOps,
+            qualityGate = qualityGate,
+            dryRun = true
+        )
+        val orchestrator = PipelineOrchestrator(
+            workspacePath = workspace.absolutePath,
+            changedFiles = listOf("design/openapi.yaml"),
+            ollamaModel = "test-model",
+            config = testConfig,
+            dependencies = deps
+        )
+
+        // When
+        val result = orchestrator.execute()
+
+        // Then: pipeline succeeds but git is never touched
+        assertTrue(result.success)
+        assertTrue(gitOps.calls.isEmpty(), "Dry-run must not invoke git operations")
+        assertEquals(1, aiAgent.calls)
+    }
+
+    @Test
     fun shouldExportMetricsFileWhenConfigured() {
         // Given
         val metricsFile = File(workspace, "metrics.txt")

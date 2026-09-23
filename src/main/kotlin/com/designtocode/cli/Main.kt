@@ -64,6 +64,12 @@ class DesignToCodeCommand : Callable<Int> {
     )
     private var baseRef: String? = null
     
+    @Option(
+        names = ["--dry-run"],
+        description = ["Run all stages except git operations and PR creation"]
+    )
+    private var dryRun: Boolean = false
+    
     override fun call(): Int {
         val workspace = File(workspacePath ?: throw IllegalArgumentException("Workspace path is required"))
         val config = loadConfig(configPath, workspace)
@@ -81,7 +87,7 @@ class DesignToCodeCommand : Callable<Int> {
             changedFiles = finalChangedFiles,
             ollamaModel = finalOllamaModel,
             config = effectiveConfig,
-            dependencies = PipelineDependencies(metricsOutputPath = metricsFile)
+            dependencies = PipelineDependencies(metricsOutputPath = metricsFile, dryRun = dryRun)
         )
         val result = orchestrator.execute()
 
