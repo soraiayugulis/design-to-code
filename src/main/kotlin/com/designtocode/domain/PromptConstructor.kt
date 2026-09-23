@@ -1,12 +1,18 @@
 package com.designtocode.domain
 
 import com.designtocode.domain.model.ProjectContext
+import com.designtocode.domain.model.SpecChange
 import com.designtocode.domain.model.TechStack
 import java.io.File
 
 class PromptConstructor(private val rulesDir: File) {
 
-    fun constructPrompt(projectContext: ProjectContext, specFiles: List<String>, workspace: File = File(".")): String {
+    fun constructPrompt(
+        projectContext: ProjectContext,
+        specFiles: List<String>,
+        workspace: File = File("."),
+        specChanges: List<SpecChange> = emptyList()
+    ): String {
         val promptBuilder = StringBuilder()
         
         // Add global rules
@@ -49,6 +55,23 @@ class PromptConstructor(private val rulesDir: File) {
             }
         }
         
+        appendSpecChanges(promptBuilder, specChanges)
+        
         return promptBuilder.toString()
+    }
+
+    private fun appendSpecChanges(promptBuilder: StringBuilder, specChanges: List<SpecChange>) {
+        if (specChanges.isEmpty()) return
+
+        promptBuilder.appendLine("## Detected Specification Changes")
+        promptBuilder.appendLine("Focus generation on the following changes detected in the design specs:")
+        specChanges.forEach { change ->
+            promptBuilder.appendLine("### ${change.changeType} — ${change.affectedSection}")
+            promptBuilder.appendLine("- File: ${change.filePath}")
+            change.lineNumberRange?.let { promptBuilder.appendLine("- Lines: ${it.first}-${it.last}") }
+            change.oldContent?.let { promptBuilder.appendLine("- Before:\n```\n$it\n```") }
+            change.newContent?.let { promptBuilder.appendLine("- After:\n```\n$it\n```") }
+            promptBuilder.appendLine()
+        }
     }
 }

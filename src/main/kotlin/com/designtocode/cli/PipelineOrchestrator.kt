@@ -9,21 +9,33 @@ import com.designtocode.domain.PipelineMetrics
 import com.designtocode.domain.PromptConstructor
 import com.designtocode.domain.QualityGateValidator
 import com.designtocode.domain.RetryHelper
+import com.designtocode.domain.SpecChangeAnalyzer
 import com.designtocode.domain.StageMetrics
 import com.designtocode.domain.adapter.GitHubCliAdapter
 import com.designtocode.domain.adapter.OllamaAdapter
+import com.designtocode.domain.model.SpecChange
+import com.designtocode.domain.port.AIAgentPort
 import com.designtocode.domain.port.GitOperationsPort
+import com.designtocode.domain.port.QualityGatePort
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 
+data class PipelineDependencies(
+    val aiAgent: AIAgentPort? = null,
+    val gitOperations: GitOperationsPort? = null,
+    val qualityGate: QualityGatePort? = null,
+    val metricsOutputPath: String? = null
+)
+
 class PipelineOrchestrator(
     private val workspacePath: String,
     private val changedFiles: List<String>,
     private val ollamaModel: String,
-    private val config: PipelineConfig
+    private val config: PipelineConfig,
+    private val dependencies: PipelineDependencies = PipelineDependencies()
 ) {
     private val logger = LoggerFactory.getLogger(PipelineOrchestrator::class.java)
     private val retryHelper = RetryHelper(config.retry)
@@ -38,67 +50,64 @@ class PipelineOrchestrator(
         val metrics = metricsCollector.startPipeline(requestId)
         
         try {
-            logPipelineStart()
+            logger.info("=== Design-to-Code AI Pipeline Started ===")
+            logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
+            logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
+            logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}, base ref=${config.git.baseRef}")
+            logger.info("Workspace: $workspacePath")
+            logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
             
-            val contextStartTime = java.time.Instant.now()
-            val projectContext = executeContextAnalysis()
-            val contextEndTime = java.time.Instant.now()
-            metrics.addStage(StageMetrics("Context Analysis", contextStartTime, contextEndTime, true))
-            
-            val promptStartTime = java.time.Instant.now()
-            val prompt = executePromptConstruction(projectContext)
-            val promptEndTime = java.time.Instant.now()
-            metrics.addStage(StageMetrics("Prompt Construction", promptStartTime, promptEndTime, true))
-            
-            val aiStartTime = java.time.Instant.now()
-            val aiResult = executeAIGeneration(prompt)
-            val aiEndTime = java.time.Instant.now()
-            metrics.addStage(StageMetrics("AI Generation", aiStartTime, aiEndTime, aiResult.success))
-            
+            val projectContext = runStage(metrics, "Context Analysis") { executeContextAnalysis() }
+            val specChanges = runStage(metrics, "Spec Change Analysis") { executeSpecChangeAnalysis() }
+            val prompt = runStage(metrics, "Prompt Construction") { executePromptConstruction(projectContext, specChanges) }
+            val aiResult = runStage(metrics, "AI Generation", { it.success }) { executeAIGeneration(prompt) }
             if (!aiResult.success) {
-                metricsCollector.completePipeline(metrics, false)
+                completeAndExport(metrics, false)
                 return@runBlocking PipelineResult(success = false, errorMessage = aiResult.errorMessage)
             }
             
-            val qualityStartTime = java.time.Instant.now()
-            val qualityResult = executeQualityGateValidation()
-            val qualityEndTime = java.time.Instant.now()
-            metrics.addStage(StageMetrics("Quality Gate Validation", qualityStartTime, qualityEndTime, qualityResult.passed))
-            
+            val qualityResult = runStage(metrics, "Quality Gate Validation", { it.passed }) { executeQualityGateValidation() }
             if (!qualityResult.passed) {
-                metricsCollector.completePipeline(metrics, false)
+                completeAndExport(metrics, false)
                 return@runBlocking PipelineResult(success = false, errorMessage = qualityResult.errorMessage)
             }
             
-            val gitStartTime = java.time.Instant.now()
-            val gitResult = executeGitOperations(qualityResult)
-            val gitEndTime = java.time.Instant.now()
-            metrics.addStage(StageMetrics("Git Operations", gitStartTime, gitEndTime, gitResult.success))
-            
+            val gitResult = runStage(metrics, "Git Operations", { it.success }) { executeGitOperations(qualityResult) }
             if (!gitResult.success) {
-                metricsCollector.completePipeline(metrics, false)
+                completeAndExport(metrics, false)
                 return@runBlocking gitResult
             }
             
-            metricsCollector.completePipeline(metrics, true)
+            completeAndExport(metrics, true)
             logPipelineSuccess(qualityResult, metrics)
             PipelineResult(success = true)
         } catch (e: Exception) {
             logger.error("Pipeline failed with unexpected error: ${e.message}", e)
-            metricsCollector.completePipeline(metrics, false)
+            completeAndExport(metrics, false)
             PipelineResult(success = false, errorMessage = e.message ?: "Pipeline failed unexpectedly")
         } finally {
             MDC.clear()
         }
     }
 
-    private fun logPipelineStart() {
-        logger.info("=== Design-to-Code AI Pipeline Started ===")
-        logger.info("Configuration: AI host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel")
-        logger.info("Configuration: Coverage threshold=${config.qualityGate.coverageThreshold}%, type=${config.qualityGate.coverageType}")
-        logger.info("Configuration: Git branch prefix=${config.git.branchPrefix}")
-        logger.info("Workspace: $workspacePath")
-        logger.info("Changed files: ${changedFiles.size} - ${changedFiles.joinToString(", ")}")
+    private suspend fun <T> runStage(
+        metrics: PipelineMetrics,
+        name: String,
+        successOf: (T) -> Boolean = { true },
+        block: suspend () -> T
+    ): T {
+        val start = java.time.Instant.now()
+        val result = block()
+        metrics.addStage(StageMetrics(name, start, java.time.Instant.now(), successOf(result)))
+        return result
+    }
+
+    private fun completeAndExport(metrics: PipelineMetrics, success: Boolean) {
+        metricsCollector.completePipeline(metrics, success)
+        dependencies.metricsOutputPath?.let { path ->
+            runCatching { metricsCollector.exportMetricsToFile(path) }
+                .onFailure { logger.warn("Failed to export pipeline metrics to $path: ${it.message}") }
+        }
     }
 
     private fun executeContextAnalysis(): com.designtocode.domain.model.ProjectContext {
@@ -114,24 +123,47 @@ class PipelineOrchestrator(
         return projectContext
     }
 
-    private fun executePromptConstruction(projectContext: com.designtocode.domain.model.ProjectContext): String {
-        logger.info("[Stage 2] Prompt Construction")
+    private fun executeSpecChangeAnalysis(): List<SpecChange> {
+        logger.info("[Stage 2] Spec Change Analysis")
+        if (changedFiles.isEmpty()) {
+            logger.info("No changed spec files provided, skipping diff analysis")
+            return emptyList()
+        }
+
+        val changes = SpecChangeAnalyzer(File(workspacePath), config.git.baseRef).analyze(changedFiles)
+        if (changes.isEmpty()) {
+            logger.warn("No structured changes detected from base ref ${config.git.baseRef}, falling back to full spec content")
+            return emptyList()
+        }
+
+        logger.info("Detected ${changes.size} structured spec changes")
+        changes.forEach { change ->
+            logger.info("  - ${change.changeType} ${change.affectedSection} (${change.filePath})")
+        }
+        return changes
+    }
+
+    private fun executePromptConstruction(
+        projectContext: com.designtocode.domain.model.ProjectContext,
+        specChanges: List<SpecChange>
+    ): String {
+        logger.info("[Stage 3] Prompt Construction")
         val rulesDir = File(workspacePath, "rules")
         logger.debug("Rules directory: ${rulesDir.absolutePath}")
         
         val promptConstructor = PromptConstructor(rulesDir)
-        val prompt = promptConstructor.constructPrompt(projectContext, changedFiles, File(workspacePath))
-        logger.info("Prompt constructed with ${changedFiles.size} spec files")
+        val prompt = promptConstructor.constructPrompt(projectContext, changedFiles, File(workspacePath), specChanges)
+        logger.info("Prompt constructed with ${changedFiles.size} spec files and ${specChanges.size} detected changes")
         logger.debug("Prompt length: ${prompt.length} characters")
         
         return prompt
     }
 
     private suspend fun executeAIGeneration(prompt: String): com.designtocode.domain.port.GenerationResult {
-        logger.info("[Stage 3] AI Generation")
+        logger.info("[Stage 4] AI Generation")
         logger.info("Ollama configuration: host=${config.ai.host}, port=${config.ai.port}, model=$ollamaModel, timeout=${config.ai.timeoutMs}ms")
         
-        val ollamaAdapter = OllamaAdapter(
+        val aiAgent = dependencies.aiAgent ?: OllamaAdapter(
             host = config.ai.host,
             port = config.ai.port,
             model = ollamaModel,
@@ -141,7 +173,7 @@ class PipelineOrchestrator(
         val aiResult = retryHelper.retryWithBackoff(
             operationName = "AI Generation",
             operation = {
-                val result = ollamaAdapter.generate(prompt, File(workspacePath))
+                val result = aiAgent.generate(prompt, File(workspacePath))
                 if (!result.success) {
                     throw AiGenerationException(result.errorMessage ?: "AI generation failed")
                 }
@@ -180,19 +212,16 @@ class PipelineOrchestrator(
     }
 
     private fun executeQualityGateValidation(): com.designtocode.domain.model.QualityGateResult {
-        logger.info("[Stage 4] Quality Gate Validation")
-        val coverageType = when (config.qualityGate.coverageType.uppercase()) {
-            "BRANCH" -> CoverageType.BRANCH
-            "INSTRUCTION" -> CoverageType.INSTRUCTION
-            else -> CoverageType.LINE
-        }
-        logger.debug("Coverage type: $coverageType")
-        
-        val qualityValidator = QualityGateValidator(
+        logger.info("[Stage 5] Quality Gate Validation")
+        val qualityValidator = dependencies.qualityGate ?: QualityGateValidator(
             projectDir = File(workspacePath),
             coverageThreshold = config.qualityGate.coverageThreshold,
             timeoutSeconds = config.qualityGate.timeoutSeconds,
-            coverageType = coverageType,
+            coverageType = when (config.qualityGate.coverageType.uppercase()) {
+                "BRANCH" -> CoverageType.BRANCH
+                "INSTRUCTION" -> CoverageType.INSTRUCTION
+                else -> CoverageType.LINE
+            },
             gradleTasks = config.build.gradleTasks
         )
         
@@ -215,9 +244,14 @@ class PipelineOrchestrator(
     }
 
     private fun executeGitOperations(qualityResult: com.designtocode.domain.model.QualityGateResult): PipelineResult {
-        logger.info("[Stage 5] Git Operations & PR Creation")
-        val gitOperations: GitOperationsPort = GitHubCliAdapter(File(workspacePath))
-        val branchName = resolveBranchName()
+        logger.info("[Stage 6] Git Operations & PR Creation")
+        val gitOperations = dependencies.gitOperations ?: GitHubCliAdapter(File(workspacePath))
+        val specFiles = changedFiles.map { File(workspacePath, it) }.filter { it.exists() }
+        val branchName = if (specFiles.isNotEmpty()) {
+            BranchNamingStrategy(config.git.branchPrefix).generateBranchName(specFiles)
+        } else {
+            "${config.git.branchPrefix}-${System.currentTimeMillis()}"
+        }
         logger.info("Creating branch: $branchName")
         
         val branchResult = gitOperations.createFeatureBranch(branchName)
@@ -250,18 +284,6 @@ class PipelineOrchestrator(
         logger.info("PR created successfully")
         
         return PipelineResult(success = true)
-    }
-
-    private fun resolveBranchName(): String {
-        val specFiles = changedFiles
-            .map { File(workspacePath, it) }
-            .filter { it.exists() }
-
-        return if (specFiles.isNotEmpty()) {
-            BranchNamingStrategy(config.git.branchPrefix).generateBranchName(specFiles)
-        } else {
-            "${config.git.branchPrefix}-${System.currentTimeMillis()}"
-        }
     }
 
     private fun logPipelineSuccess(qualityResult: com.designtocode.domain.model.QualityGateResult, metrics: PipelineMetrics) {

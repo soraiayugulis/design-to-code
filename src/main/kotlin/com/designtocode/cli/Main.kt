@@ -50,6 +50,13 @@ class DesignToCodeCommand : Callable<Int> {
     )
     private var ollamaModel: String? = null
     
+    @Option(
+        names = ["--metrics-file"],
+        description = ["Optional path to export pipeline metrics"],
+        paramLabel = "metricsFile"
+    )
+    private var metricsFile: String? = null
+    
     override fun call(): Int {
         val workspace = File(workspacePath ?: throw IllegalArgumentException("Workspace path is required"))
         val config = loadConfig(configPath, workspace)
@@ -65,7 +72,8 @@ class DesignToCodeCommand : Callable<Int> {
             workspacePath = workspacePath!!,
             changedFiles = finalChangedFiles,
             ollamaModel = finalOllamaModel,
-            config = config
+            config = config,
+            dependencies = PipelineDependencies(metricsOutputPath = metricsFile)
         )
         val result = orchestrator.execute()
 

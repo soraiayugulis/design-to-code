@@ -1,6 +1,7 @@
 package com.designtocode.domain
 
 import com.designtocode.domain.model.QualityGateResult
+import com.designtocode.domain.port.QualityGatePort
 import org.slf4j.LoggerFactory
 import java.io.File
 
@@ -16,10 +17,10 @@ class QualityGateValidator(
     private val timeoutSeconds: Long = 900L, // 15 minutes default
     private val coverageType: CoverageType = CoverageType.LINE,
     private val gradleTasks: List<String> = listOf("clean", "build")
-) {
+) : QualityGatePort {
     private val logger = LoggerFactory.getLogger(QualityGateValidator::class.java)
 
-    fun validate(): QualityGateResult {
+    override fun validate(): QualityGateResult {
         logger.info("Starting quality gate validation")
         logger.info("Project directory: ${projectDir.absolutePath}")
         logger.info("Coverage threshold: $coverageThreshold%, type: $coverageType")
