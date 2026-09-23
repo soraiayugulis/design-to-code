@@ -41,7 +41,15 @@ class OllamaAdapter(
                     logger.debug("Response content length: ${response.content?.length ?: 0} characters")
                     val generatedFiles = parseGeneratedFiles(response.content ?: "", workspace)
                     logger.info("Generated ${generatedFiles.size} files")
-                    GenerationResult(success = true, generatedFiles = generatedFiles)
+                    if (generatedFiles.isEmpty()) {
+                        GenerationResult(
+                            success = false,
+                            generatedFiles = emptyList(),
+                            errorMessage = "AI response contained no files in the expected format"
+                        )
+                    } else {
+                        GenerationResult(success = true, generatedFiles = generatedFiles)
+                    }
                 } else {
                     logger.error("Ollama API call failed: ${response.error}")
                     GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = response.error ?: "Unknown error")

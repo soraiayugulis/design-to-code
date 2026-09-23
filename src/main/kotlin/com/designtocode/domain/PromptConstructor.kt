@@ -56,8 +56,20 @@ class PromptConstructor(private val rulesDir: File) {
         }
         
         appendSpecChanges(promptBuilder, specChanges)
+        appendResponseFormat(promptBuilder)
         
         return promptBuilder.toString()
+    }
+
+    private fun appendResponseFormat(promptBuilder: StringBuilder) {
+        promptBuilder.appendLine("## Response Format")
+        promptBuilder.appendLine("Respond ONLY with markdown code blocks declaring the target file path after the language tag:")
+        promptBuilder.appendLine("```kotlin:src/main/kotlin/com/example/UserController.kt")
+        promptBuilder.appendLine("package com.example")
+        promptBuilder.appendLine("// file content")
+        promptBuilder.appendLine("```")
+        promptBuilder.appendLine("Use `MODIFY:path/to/file.kt` or `DELETE:path/to/file.kt` markers to change or remove existing files.")
+        promptBuilder.appendLine("Generate the actual implementation for the specification changes above. Do NOT copy the example verbatim and do NOT include explanations outside the code blocks.")
     }
 
     private fun appendSpecChanges(promptBuilder: StringBuilder, specChanges: List<SpecChange>) {

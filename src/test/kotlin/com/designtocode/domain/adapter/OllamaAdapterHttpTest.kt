@@ -87,13 +87,13 @@ class OllamaAdapterHttpTest {
     }
 
     @Test
-    fun shouldReturnEmptyFileListWhenResponseHasNoCodeBlocks() = runTest {
+    fun shouldFailWhenResponseHasNoFilesInExpectedFormat() = runTest {
         responseBody = """{"response":"some prose without any code block","done":true}"""
         val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS)
 
         val result = adapter.generate("prompt", workspace)
 
-        assertTrue(result.success)
-        assertTrue(result.generatedFiles.isEmpty())
+        assertFalse(result.success)
+        assertTrue(result.errorMessage?.contains("no files") == true)
     }
 }
