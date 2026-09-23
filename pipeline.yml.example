@@ -10,6 +10,9 @@ ai:
 git:
   branchPrefix: feature/ai-gen
   commitMessageFormat: conventional
+  # Base ref used for `git diff <baseRef> -- design/` spec change analysis.
+  # In CI the workflow passes the PR base SHA via --base-ref.
+  baseRef: HEAD~1
 
 qualityGate:
   coverageThreshold: 90.0

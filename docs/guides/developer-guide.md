@@ -63,25 +63,24 @@ The pipeline follows Hexagonal Architecture (Ports & Adapters) pattern for the A
 #### State Transitions
 
 ```
-IDLE → CONTEXT_ANALYSIS → AI_GENERATION → QUALITY_VALIDATION → PR_CREATION → COMPLETED
-                              ↓                   ↓
-                         FAILED              FAILED
+IDLE → CONTEXT_ANALYSIS → SPEC_CHANGE_ANALYSIS → PROMPT_CONSTRUCTION → AI_GENERATION → QUALITY_VALIDATION → PR_CREATION → COMPLETED
+                                                                      ↓                   ↓
+                                                                 FAILED              FAILED
 ```
 
 ### Ports and Adapters
 
 #### Ports (Interfaces)
 
-- **GitOperationsPort**: Interface for Git operations
-- **BuildSystemPort**: Interface for Gradle execution
 - **AIAgentPort**: Interface for AI code generation
-- **DockerRuntimePort**: Interface for container orchestration
+- **GitOperationsPort**: Interface for Git operations
+- **QualityGatePort**: Interface for quality gate validation
 
 #### Adapters (Implementations)
 
-- **GitHubCliAdapter**: GitHub CLI implementation
 - **OllamaAdapter**: Ollama LLM implementation
-- **TestcontainersAdapter**: Docker container management
+- **GitHubCliAdapter**: Git + GitHub CLI implementation
+- **QualityGateValidator**: Gradle/Detekt/Kover quality gate implementation
 
 ## Project Structure
 

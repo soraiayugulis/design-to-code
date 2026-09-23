@@ -26,18 +26,18 @@ The Design-to-Code AI Pipeline is a distributed Internal Developer Platform (IDP
 
 - **GitHub Actions Workflow**: Triggers on design branch merges
 - **Kotlin-based AI Orchestration Engine**: Analyzes project context and executes code generation
-- **Quality Gate Enforcement**: Testcontainers-based integration testing and 100% code coverage validation
+- **Quality Gate Enforcement**: Build, Detekt and configurable coverage validation (90% default for generated code; 80% Kover gate on this project)
 - **Automated Pull Request Creation**: For human review and approval
 
 ## Features
 
 - **Automated Code Generation**: Transforms OpenAPI/Markdown specs to Kotlin code
+- **Spec Change Analysis**: Parses the git diff of design specs into structured changes (section, change type, line ranges) to focus the prompt
 - **Hexagonal Architecture**: Clean separation of concerns with ports and adapters
-- **Quality Gates**: Enforces 100% code coverage, linting, and compilation checks
-- **Git Operations**: Automated branch creation, commits, and PR creation
-- **Monitoring & Metrics**: Pipeline execution tracking and metrics export
+- **Quality Gates**: Configurable coverage threshold (default 90%), linting, and compilation checks
+- **Git Operations**: Automated branch creation, commits, push, and PR creation
+- **Monitoring & Metrics**: Pipeline execution tracking and optional metrics export (`--metrics-file`)
 - **Branch Naming Strategy**: SHA-based branch naming for traceability
-- **Conflict Detection**: Automatic detection of merge conflicts
 - **PR Metadata Support**: Labels, reviewers, and assignees for pull requests
 
 ## Technology Stack
@@ -51,8 +51,8 @@ The Design-to-Code AI Pipeline is a distributed Internal Developer Platform (IDP
 ### Quality & Testing
 
 - **Linting**: Detekt (Kotlin static analysis)
-- **Code Coverage**: Kover (Kotlin coverage tool)
-- **Integration Testing**: Testcontainers (Docker-based testing)
+- **Code Coverage**: Kover (80% minimum verified on this project)
+- **Integration Testing**: Testcontainers (optional — tests are skipped when Docker is unavailable)
 - **Testing Framework**: JUnit 5
 
 ### AI & Code Generation
@@ -95,9 +95,10 @@ The pipeline follows Hexagonal Architecture (Ports & Adapters) pattern for the A
                      ▼
 ┌────────────────────────────────────────────────────────────┐
 │              AI Engine Container                           │
-│  ┌──────────────┐  ┌─────────────────┐  ┌──────────────┐   │
-│  │ContextBuilder│→ │PromptConstructor│→ │  Ollama API  │   │
-│  └──────────────┘  └─────────────────┘  └──────────────┘   │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │ContextBuilder│→ │SpecChangeAnalyzer│→ │  Ollama API  │  │
+│  │              │  │PromptConstructor │  │              │  │
+│  └──────────────┘  └──────────────────┘  └──────────────┘  │
 └────────────────────┬───────────────────────────────────────┘
                      │
                      ▼
@@ -130,25 +131,24 @@ The pipeline follows Hexagonal Architecture (Ports & Adapters) pattern for the A
 #### State Transitions
 
 ```
-IDLE → CONTEXT_ANALYSIS → AI_GENERATION → QUALITY_VALIDATION → PR_CREATION → COMPLETED
-                              ↓                   ↓
-                         FAILED              FAILED
+IDLE → CONTEXT_ANALYSIS → SPEC_CHANGE_ANALYSIS → PROMPT_CONSTRUCTION → AI_GENERATION → QUALITY_VALIDATION → PR_CREATION → COMPLETED
+                                                                      ↓                   ↓
+                                                                 FAILED              FAILED
 ```
 
 ### Ports and Adapters
 
 #### Ports (Interfaces)
 
-- **GitOperationsPort**: Interface for Git operations
-- **BuildSystemPort**: Interface for Gradle execution
 - **AIAgentPort**: Interface for AI code generation
-- **DockerRuntimePort**: Interface for container orchestration
+- **GitOperationsPort**: Interface for Git operations
+- **QualityGatePort**: Interface for quality gate validation
 
 #### Adapters (Implementations)
 
-- **GitHubCliAdapter**: GitHub CLI implementation
 - **OllamaAdapter**: Ollama LLM implementation
-- **TestcontainersAdapter**: Docker container management
+- **GitHubCliAdapter**: Git + GitHub CLI implementation
+- **QualityGateValidator**: Gradle/Detekt/Kover quality gate implementation
 
 ## Getting Started
 
@@ -161,6 +161,21 @@ git clone https://github.com/soraiayugulis/design-to-code.git
 cd design-to-code
 ./gradlew build
 ```
+
+### CLI Usage
+
+```bash
+./gradlew run --args="[options] <workspacePath> [changedFiles]"
+```
+
+| Option | Description |
+|---|---|
+| `-c`, `--config` | Path to `pipeline.yml` (defaults to `<workspace>/pipeline.yml`; see `pipeline.yml.example`) |
+| `-m`, `--model` | Ollama model override (default `codellama:13b`) |
+| `-b`, `--base-ref` | Git base ref for spec diff analysis (default `HEAD~1`, or `git.baseRef` in config) |
+| `--metrics-file` | Export pipeline metrics to a file |
+
+`changedFiles` accepts a comma-separated list of design spec paths (e.g. `design/api.yaml,design/model.md`).
 
 ## Development
 

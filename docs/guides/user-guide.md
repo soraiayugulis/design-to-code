@@ -153,7 +153,7 @@ src/main/kotlin/com/yourproject/
 2. Check configuration: Ensure `ai.host` and `ai.port` are correct
 3. Test connection: `curl http://localhost:11434/api/tags`
 
-#### Quality Gate Fails with "Coverage Below 100%"
+#### Quality Gate Fails with "Coverage Below Threshold"
 
 **Problem**: Generated code doesn't meet coverage threshold
 
