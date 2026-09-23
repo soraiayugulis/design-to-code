@@ -1,6 +1,7 @@
 package com.designtocode.cli
 
 import com.designtocode.config.PipelineConfig
+import com.designtocode.domain.BranchNamingStrategy
 import com.designtocode.domain.ContextBuilder
 import com.designtocode.domain.CoverageType
 import com.designtocode.domain.MetricsCollector
@@ -216,7 +217,7 @@ class PipelineOrchestrator(
     private fun executeGitOperations(qualityResult: com.designtocode.domain.model.QualityGateResult): PipelineResult {
         logger.info("[Stage 5] Git Operations & PR Creation")
         val gitOperations: GitOperationsPort = GitHubCliAdapter(File(workspacePath))
-        val branchName = "${config.git.branchPrefix}-${System.currentTimeMillis()}"
+        val branchName = resolveBranchName()
         logger.info("Creating branch: $branchName")
         
         val branchResult = gitOperations.createFeatureBranch(branchName)
@@ -249,6 +250,18 @@ class PipelineOrchestrator(
         logger.info("PR created successfully")
         
         return PipelineResult(success = true)
+    }
+
+    private fun resolveBranchName(): String {
+        val specFiles = changedFiles
+            .map { File(workspacePath, it) }
+            .filter { it.exists() }
+
+        return if (specFiles.isNotEmpty()) {
+            BranchNamingStrategy(config.git.branchPrefix).generateBranchName(specFiles)
+        } else {
+            "${config.git.branchPrefix}-${System.currentTimeMillis()}"
+        }
     }
 
     private fun logPipelineSuccess(qualityResult: com.designtocode.domain.model.QualityGateResult, metrics: PipelineMetrics) {
