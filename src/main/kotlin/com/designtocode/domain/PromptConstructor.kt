@@ -6,7 +6,7 @@ import java.io.File
 
 class PromptConstructor(private val rulesDir: File) {
 
-    fun constructPrompt(projectContext: ProjectContext, specFiles: List<String>): String {
+    fun constructPrompt(projectContext: ProjectContext, specFiles: List<String>, workspace: File = File(".")): String {
         val promptBuilder = StringBuilder()
         
         // Add global rules
@@ -40,7 +40,7 @@ class PromptConstructor(private val rulesDir: File) {
             promptBuilder.appendLine("No specification files provided")
         } else {
             specFiles.forEach { specPath ->
-                val specFile = File(specPath)
+                val specFile = File(specPath).takeIf { it.isAbsolute } ?: File(workspace, specPath)
                 if (specFile.exists()) {
                     promptBuilder.appendLine("### ${specFile.name}")
                     promptBuilder.appendLine(specFile.readText())

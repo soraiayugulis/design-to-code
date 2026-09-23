@@ -82,6 +82,10 @@ class PipelineOrchestrator(
             metricsCollector.completePipeline(metrics, true)
             logPipelineSuccess(qualityResult, metrics)
             PipelineResult(success = true)
+        } catch (e: Exception) {
+            logger.error("Pipeline failed with unexpected error: ${e.message}", e)
+            metricsCollector.completePipeline(metrics, false)
+            PipelineResult(success = false, errorMessage = e.message ?: "Pipeline failed unexpectedly")
         } finally {
             MDC.clear()
         }
@@ -115,7 +119,7 @@ class PipelineOrchestrator(
         logger.debug("Rules directory: ${rulesDir.absolutePath}")
         
         val promptConstructor = PromptConstructor(rulesDir)
-        val prompt = promptConstructor.constructPrompt(projectContext, changedFiles)
+        val prompt = promptConstructor.constructPrompt(projectContext, changedFiles, File(workspacePath))
         logger.info("Prompt constructed with ${changedFiles.size} spec files")
         logger.debug("Prompt length: ${prompt.length} characters")
         
@@ -136,11 +140,16 @@ class PipelineOrchestrator(
         val aiResult = retryHelper.retryWithBackoff(
             operationName = "AI Generation",
             operation = {
-                ollamaAdapter.generate(prompt, File(workspacePath))
+                val result = ollamaAdapter.generate(prompt, File(workspacePath))
+                if (!result.success) {
+                    throw AiGenerationException(result.errorMessage ?: "AI generation failed")
+                }
+                result
             },
             isTransientFailure = { throwable ->
                 val message = throwable.message?.lowercase() ?: ""
                 message.contains("timeout") ||
+                message.contains("timed out") ||
                 message.contains("connection") ||
                 message.contains("network") ||
                 message.contains("503") ||
@@ -182,7 +191,8 @@ class PipelineOrchestrator(
             projectDir = File(workspacePath),
             coverageThreshold = config.qualityGate.coverageThreshold,
             timeoutSeconds = config.qualityGate.timeoutSeconds,
-            coverageType = coverageType
+            coverageType = coverageType,
+            gradleTasks = config.build.gradleTasks
         )
         
         logger.info("Running quality gate validation with timeout: ${config.qualityGate.timeoutSeconds}s")
@@ -261,3 +271,5 @@ data class PipelineResult(
     val success: Boolean,
     val errorMessage: String? = null
 )
+
+private class AiGenerationException(message: String) : Exception(message)
