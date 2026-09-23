@@ -17,7 +17,8 @@ data class AIConfig(
 
 data class GitConfig(
     val branchPrefix: String = "feature/ai-gen",
-    val commitMessageFormat: String = "conventional"
+    val commitMessageFormat: String = "conventional",
+    val baseRef: String = "HEAD~1"
 )
 
 data class QualityGateConfig(

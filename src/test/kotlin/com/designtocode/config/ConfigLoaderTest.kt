@@ -261,6 +261,36 @@ class ConfigLoaderTest {
     }
 
     @Test
+    fun shouldParseGitBaseRefAndDefaultToHeadParent() {
+        // Given
+        val configLoader = ConfigLoader()
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("""
+            ai: {}
+            git:
+              baseRef: origin/main
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+
+        // When
+        val config = configLoader.loadConfig(configFile)
+
+        // Then
+        assertEquals("origin/main", config.git.baseRef)
+
+        // Default when not specified
+        val defaultFile = File(tempDir, "pipeline-default.yml")
+        defaultFile.writeText("""
+            ai: {}
+            git: {}
+            qualityGate: {}
+            build: {}
+        """.trimIndent())
+        assertEquals("HEAD~1", configLoader.loadConfig(defaultFile).git.baseRef)
+    }
+
+    @Test
     fun shouldParseAIConfigWithCustomValues() {
         // Given
         val configLoader = ConfigLoader()

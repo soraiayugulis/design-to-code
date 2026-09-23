@@ -62,7 +62,8 @@ class ConfigLoader {
     private fun parseGitConfig(gitMap: Map<String, Any>): GitConfig {
         return GitConfig(
             branchPrefix = gitMap["branchPrefix"] as? String ?: "feature/ai-gen",
-            commitMessageFormat = gitMap["commitMessageFormat"] as? String ?: "conventional"
+            commitMessageFormat = gitMap["commitMessageFormat"] as? String ?: "conventional",
+            baseRef = gitMap["baseRef"] as? String ?: "HEAD~1"
         )
     }
 
