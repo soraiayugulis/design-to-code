@@ -8,7 +8,7 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.assertTrue
 
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @DisplayName("Testcontainers Setup Tests")
 class TestcontainersSetupTest {
 
