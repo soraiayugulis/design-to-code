@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -135,8 +136,9 @@ class QualityGateValidatorTest {
         // When
         val result = qualityGateValidator.validate()
 
-        // Then
-        assertTrue(result.coveragePercentage > 0, "Coverage should be calculated")
+        // Then: LINE coverage = 90 / (90 + 10) = 90%
+        assertEquals(90.0, result.coveragePercentage, 0.01, "LINE coverage should be 90%")
+        assertTrue(result.passed, "90% coverage meets the default 90% threshold")
     }
 
     @Test
@@ -165,8 +167,8 @@ class QualityGateValidatorTest {
         // When
         val result = qualityGateValidator.validate()
 
-        // Then
-        assertTrue(result.coveragePercentage > 0, "Coverage should be calculated")
+        // Then: JaCoCo fallback LINE coverage = 90 / (90 + 10) = 90%
+        assertEquals(90.0, result.coveragePercentage, 0.01, "JaCoCo LINE coverage should be 90%")
     }
 
     @Test
@@ -176,49 +178,64 @@ class QualityGateValidatorTest {
         val gradlew = File(projectDir, "gradlew")
         gradlew.writeText("#!/bin/bash\nexit 0")
         gradlew.setExecutable(true)
-        
-        val qualityGateValidator = QualityGateValidator(projectDir, coverageType = CoverageType.BRANCH)
 
-        // When
-        val result = qualityGateValidator.validate()
+        val reportDir = File(projectDir, "build/reports/kover/xml")
+        reportDir.mkdirs()
+        File(reportDir, "report.xml").writeText("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <report>
+                <counter type="LINE" missed="50" covered="50"/>
+                <counter type="BRANCH" missed="5" covered="45"/>
+            </report>
+        """.trimIndent())
+
+        // When: BRANCH coverage = 45 / (45 + 5) = 90%, while LINE is only 50%
+        val result = QualityGateValidator(projectDir, coverageType = CoverageType.BRANCH).validate()
 
         // Then
-        // Coverage should be calculated based on branch type
-        assertTrue(result.coveragePercentage >= 0, "Coverage should be calculated")
+        assertEquals(90.0, result.coveragePercentage, 0.01, "BRANCH coverage should be 90%")
     }
 
     @Test
-    fun shouldValidateCoverageThresholdCorrectly() {
-        // Given
+    fun shouldPassWhenCoverageMeetsThresholdAndFailWhenBelow() {
+        // Given: deterministic 90% coverage report
         val projectDir = tempDir
-        val gradlew = File(projectDir, "gradlew")
-        gradlew.writeText("#!/bin/bash\nexit 0")
-        gradlew.setExecutable(true)
-        
-        val qualityGateValidator = QualityGateValidator(projectDir, coverageThreshold = 50.0)
-
-        // When
-        val result = qualityGateValidator.validate()
-
-        // Then
-        // If coverage is above 50%, should pass
-        if (result.coveragePercentage >= 50.0) {
-            assertTrue(result.passed, "Should pass when coverage meets threshold")
+        File(projectDir, "gradlew").apply {
+            writeText("#!/bin/bash\nexit 0")
+            setExecutable(true)
         }
+        val reportDir = File(projectDir, "build/reports/kover/xml")
+        reportDir.mkdirs()
+        File(reportDir, "report.xml").writeText("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <report>
+                <counter type="LINE" missed="10" covered="90"/>
+            </report>
+        """.trimIndent())
+
+        // When / Then
+        assertTrue(
+            QualityGateValidator(projectDir, coverageThreshold = 50.0).validate().passed,
+            "90% coverage must pass a 50% threshold"
+        )
+        val failing = QualityGateValidator(projectDir, coverageThreshold = 95.0).validate()
+        assertFalse(failing.passed, "90% coverage must fail a 95% threshold")
+        assertTrue(failing.errorMessage?.contains("below threshold") == true)
     }
 
     @Test
-    fun shouldExecuteDetektAsPartOfQualityGate() {
-        // Given
+    fun shouldFailGateWhenNoCoverageReportExists() {
+        // Given: mock gradlew succeeds for every task, but no coverage report is generated
         val qualityGateValidator = QualityGateValidator(tempDir)
 
         // When
         val result = qualityGateValidator.validate()
 
         // Then
-        // Detekt should be executed as part of quality gate
-        // Since we have a mock gradlew, Detekt will pass
-        assertTrue(result.buildSuccess || result.errorMessage != null)
+        assertTrue(result.buildSuccess, "Build should succeed")
+        assertFalse(result.passed, "Gate must fail when no coverage report exists")
+        assertEquals(0.0, result.coveragePercentage)
+        assertTrue(result.errorMessage?.contains("below threshold") == true)
     }
 
     @Test
@@ -236,10 +253,26 @@ class QualityGateValidatorTest {
         val result = qualityGateValidator.validate()
 
         // Then
-        // Quality gate should fail due to Detekt issues
         assertFalse(result.passed, "Quality gate should fail when Detekt finds issues")
-        // The lint issues count may be 0 if parsing fails, but the gate should still fail
+        assertEquals(5, result.lintIssues, "Should parse the issue count from Detekt output")
         assertTrue(result.errorMessage?.contains("Detekt") == true, "Error should mention Detekt")
+    }
+
+    @Test
+    fun shouldParseRealDetektWeightedIssuesOutput() {
+        // Given: real Detekt 1.23 output format
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText(
+            "#!/bin/bash\nif [ \"$1\" = \"detekt\" ]; then\n  echo 'Analysis failed with 7 weighted issues.'\n  exit 1\nfi\nexit 0"
+        )
+        gradlew.setExecutable(true)
+
+        // When
+        val result = QualityGateValidator(tempDir).validate()
+
+        // Then
+        assertFalse(result.passed)
+        assertEquals(7, result.lintIssues, "Should parse the weighted issues count from real Detekt output")
     }
 
     @Test
