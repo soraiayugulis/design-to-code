@@ -126,9 +126,9 @@ jobs:
           echo "  Ollama model: $OLLAMA_MODEL"
           
           if [ -n "$CONFIG_PATH" ]; then
-            ./gradlew run --args="-c $CONFIG_PATH $CHANGED_FILES $WORKSPACE_PATH"
+            ./gradlew run --args="-c $CONFIG_PATH $WORKSPACE_PATH $CHANGED_FILES"
           else
-            ./gradlew run --args="$CHANGED_FILES $WORKSPACE_PATH"
+            ./gradlew run --args="$WORKSPACE_PATH $CHANGED_FILES"
           fi
       
       - name: Upload generated code artifacts
