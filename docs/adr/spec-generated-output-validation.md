@@ -1,7 +1,6 @@
 # Spec: Generated Output Grounding & Placement Validation
 
-## Status: Draft
-## Commit Authorization: Not Authorized
+## Status: Implemented — `feature/design2code-generated-output-validation` (commits `7bb303b`…`300c14a`)
 ## Related: `docs/adr/spec-incremental-code-generation.md` (broader initiative — this spec extracts and delivers the incident-driven chain independently)
 
 This spec defines the minimal, deterministic chain that prevents the pipeline from producing a "harmless but useless" diff: generated files must land inside configured source roots, spec-declared target files must be grounded in the prompt and verified as modified, and violations trigger a bounded corrective retry before failing the run.
@@ -138,7 +137,7 @@ enum class ViolationType { OUTSIDE_SOURCE_ROOT, TARGET_NOT_MODIFIED, UNEXPECTED_
 
 - **R1 — Path normalization:** declared paths are normalized (`./` stripped, `\` → `/`, canonicalized) before comparison; containment uses `Path.startsWith`, never string-prefix on raw paths.
 - **R2 — Root resolution:** `allowedRoots` config → else auto-detect → else workspace root with WARN log.
-- **R3 — Enforcement point:** every write/delete inside `OllamaAdapter.parseGeneratedFiles` passes `SourceRootValidator`; rejections never touch disk.
+- **R3 — Enforcement point:** every write/delete inside `GeneratedResponseParser` (extracted from `OllamaAdapter`) passes `SourceRootValidator`; rejections never touch disk.
 - **R4 — Target modification check:** target is "modified" iff it appears in the post-generation `git status --porcelain` delta vs the pipeline-start snapshot (modified, added, or untracked).
 - **R5 — Feedback section:** `OUTSIDE_SOURCE_ROOT` → rejected paths + allowed roots; `TARGET_NOT_MODIFIED` → expected target list; both → both blocks.
 - **R6 — Retry bounds:** at most `maxCorrectiveRetries` corrective attempts; identical sorted `(type, filePath)` violation signature between consecutive attempts → early stop.
@@ -183,6 +182,13 @@ Dependency-ordered; each task = objective + file + acceptance criteria. TDD per 
 - **A10 — Android support** — `domain/model/TechStack.kt`, `domain/ContextBuilder.kt`, `domain/PromptConstructor.kt`, `src/main/resources/rules/android-rules.md`. Detect `com.android.application|library`; bundled rules as workspace fallback (F14). Independent — may run parallel to A3–A9.
 - **A11 — Docs** — `docs/ai-response-format.md` (rooted example + rejection semantics), `README.md` (outputValidation config). Depends: A1–A9.
 
+### Implementation deltas (as-built vs spec)
+
+- **A4** — the write-path gate was extracted into `GeneratedResponseParser` (`domain/adapter/`): `OllamaAdapter` keeps HTTP concerns only, and the parser is unit-testable without reflection.
+- **A8** — the corrective `generate` is `suspend (String) -> GenerationResult`, not `AIAgentPort`: the pipeline wraps each corrective call in `RetryHelper` transient backoff, keeping R7 without duplicating retry code. Bundles `CorrectionRequest` (A8) and `OutputVerificationRequest` (A9) were added to satisfy parameter-count limits.
+- **A9** — a dedicated `OutputVerificationStage` (`validation/`) owns root resolution, target extraction, baseline capture and the verify + corrective-retry sequence; `PipelineOrchestrator` calls a single `verify(request, generate)`. This keeps the orchestrator within size limits and the concern cohesive.
+- **A10** — `ContextBuilder` additionally scans module `*/build.gradle.kts` files (sorted, ignoring `build`/`out`/`.gradle`/`.git`/`node_modules`) when the root file does not declare the stack — required for multi-module Android projects such as where-am-i, whose plugin lives in `app/build.gradle.kts`. The bundled-rules mechanism is generic (`/rules/<file>` classpath fallback for any framework); only `android-rules.md` is bundled today.
+
 ## 10. Test Cases
 
 | Fact | Test |
@@ -200,13 +206,19 @@ Dependency-ordered; each task = objective + file + acceptance criteria. TDD per 
 
 ## 11. Success Criteria
 
-- [ ] Generated file outside allowed roots is never written; rejection reported with reason
-- [ ] Declared `target.file` unmodified → run fails, no branch push, no PR
-- [ ] Corrective retry regenerates with violation-specific feedback, bounded, early exit on repeat
-- [ ] New-file specs pass verification when the target is created
-- [ ] `enabled=false` reproduces current behavior exactly
-- [ ] `change-language-setting-color` replay produces a diff on the real `SettingsScreen.kt` or fails loudly
-- [ ] All unit tests pass; Detekt clean; no tautological tests
+- [x] Generated file outside allowed roots is never written; rejection reported with reason
+- [x] Declared `target.file` unmodified → run fails, no branch push, no PR
+- [x] Corrective retry regenerates with violation-specific feedback, bounded, early exit on repeat
+- [x] New-file specs pass verification when the target is created
+- [x] `enabled=false` reproduces current behavior exactly
+- [x] `change-language-setting-color` replay produces a diff on the real `SettingsScreen.kt` or fails loudly
+- [x] All unit tests pass; Detekt clean; no tautological tests
+
+### F15 — E2E replay result (2026-09-23, `--dry-run`, `qwen2.5-coder:7b`, 294s)
+
+- Roots auto-detected: `app/src/main/java`, `app/src/test/java`; stack detected: `ANDROID` via `app/build.gradle.kts`; bundled rules injected; target extracted (`SettingsScreen.kt`, symbol `LanguageOption`).
+- Generation wrote exactly the declared target — the incident path was not reproduced. `modifiedTargets=1/1`, 0 violations, `testDebugUnitTest` green, Detekt clean, git ops skipped by dry-run.
+- **Known limitation:** the verifier proves the target *changed*, not that the change is *correct* — the model emitted `White` instead of the spec'd `DarkBlue`. Semantic verification remains out of scope (no AI-in-the-loop verification); candidates: diff-token assertions in specs or screenshot/golden tests.
 
 ## 12. Risks & Mitigations
 
@@ -218,5 +230,6 @@ Dependency-ordered; each task = objective + file + acceptance criteria. TDD per 
 
 ## 13. Open Questions
 
-- Should the corrective feedback include the rejected file's *content* (to salvage intent) or paths only? Default: paths only — cheaper.
-- Prompt size guard for multiple/large targets beyond the 20 000-char per-file cap: leave unbounded for now or add a total cap?
+- ~~Should the corrective feedback include the rejected file's *content* (to salvage intent) or paths only?~~ Resolved: paths only (as built).
+- Prompt size guard for multiple/large targets beyond the 20 000-char per-file cap: left unbounded as built (per-file cap only).
+- Should verification gain an optional semantic layer (e.g. spec-declared diff assertions) to catch correct-placement/wrong-change outputs like the E2E replay produced?
