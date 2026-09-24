@@ -160,7 +160,8 @@ class PipelineOrchestrator(
         val prompt = promptConstructor.constructPrompt(projectContext, changedFiles, File(workspacePath), specChanges)
         logger.info("Prompt constructed with ${changedFiles.size} spec files and ${specChanges.size} detected changes")
         logger.debug("Prompt length: ${prompt.length} characters")
-        
+        logger.info("=== Generated Prompt ===\n$prompt\n=== End of Prompt ===")
+
         return prompt
     }
 
