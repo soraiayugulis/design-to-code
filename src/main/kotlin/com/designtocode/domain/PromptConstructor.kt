@@ -2,6 +2,7 @@ package com.designtocode.domain
 
 import com.designtocode.domain.model.ProjectContext
 import com.designtocode.domain.model.SpecChange
+import com.designtocode.domain.model.SpecRule
 import com.designtocode.domain.model.SpecTarget
 import com.designtocode.domain.model.TechStack
 import java.io.File
@@ -63,7 +64,8 @@ class PromptConstructor(private val rulesDir: File) {
         appendSpecChanges(promptBuilder, guidance.specChanges)
         appendAllowedRoots(promptBuilder, guidance.allowedRoots)
         appendTargetFiles(promptBuilder, guidance.specTargets, workspace)
-        appendResponseFormat(promptBuilder, guidance.allowedRoots)
+        appendAcceptanceChecklist(promptBuilder, guidance.specRules)
+        appendResponseFormat(promptBuilder, guidance.allowedRoots, guidance.specTargets)
 
         return promptBuilder.toString()
     }
@@ -89,12 +91,16 @@ class PromptConstructor(private val rulesDir: File) {
             promptBuilder.appendLine("### ${target.filePath}")
             if (target.exists) {
                 promptBuilder.appendLine("Current content:")
-                promptBuilder.appendLine("```")
+                promptBuilder.appendLine("```${fenceLanguage(target.filePath)}")
                 promptBuilder.appendLine(targetContent(workspace, target))
                 promptBuilder.appendLine("```")
                 promptBuilder.appendLine(
                     "Apply the change via `MODIFY:${target.filePath}` followed by a code block " +
                         "with the complete new file content."
+                )
+                promptBuilder.appendLine(
+                    "Make the smallest possible edit that satisfies the spec — do not reformat, refactor, " +
+                        "or add redundant conditionals; preserve the existing structure verbatim."
                 )
             } else {
                 promptBuilder.appendLine(
@@ -102,9 +108,32 @@ class PromptConstructor(private val rulesDir: File) {
                         "declaring the file path after the language tag)"
                 )
             }
-            target.symbol?.let { promptBuilder.appendLine("The change must be scoped inside `$it`.") }
+            target.symbol?.let { symbol ->
+                promptBuilder.appendLine("The change must be scoped inside `$symbol`.")
+                target.symbolLine?.let { promptBuilder.appendLine("`$symbol` is declared at ~line $it.") }
+            }
             promptBuilder.appendLine()
         }
+    }
+
+    private fun fenceLanguage(filePath: String): String = when (filePath.substringAfterLast('.')) {
+        "kt", "kts" -> "kotlin"
+        "java" -> "java"
+        "xml" -> "xml"
+        "yaml", "yml" -> "yaml"
+        else -> ""
+    }
+
+    private fun appendAcceptanceChecklist(promptBuilder: StringBuilder, specRules: List<SpecRule>) {
+        if (specRules.isEmpty()) return
+
+        promptBuilder.appendLine("## Acceptance Checklist")
+        promptBuilder.appendLine("Your response is correct only if every rule below holds:")
+        specRules.forEach { rule ->
+            val whenPart = rule.whenClause?.let { " — when $it," } ?: " —"
+            promptBuilder.appendLine("- [ ] ${rule.id}$whenPart then ${rule.thenClause}")
+        }
+        promptBuilder.appendLine()
     }
 
     private fun bundledRules(fileName: String): String? =
@@ -119,12 +148,35 @@ class PromptConstructor(private val rulesDir: File) {
         }
     }
 
-    private fun appendResponseFormat(promptBuilder: StringBuilder, allowedRoots: List<String>) {
+    private fun appendResponseFormat(
+        promptBuilder: StringBuilder,
+        allowedRoots: List<String>,
+        specTargets: List<SpecTarget>
+    ) {
+        val existingTarget = specTargets.firstOrNull { it.exists }
+
+        promptBuilder.appendLine("## Response Format")
+        if (existingTarget != null) {
+            promptBuilder.appendLine("Respond ONLY with markdown code blocks. To modify the declared target, emit:")
+            promptBuilder.appendLine("MODIFY:${existingTarget.filePath}")
+            promptBuilder.appendLine("```kotlin")
+            packageOf(existingTarget.filePath, allowedRoots)?.let {
+                promptBuilder.appendLine("package $it // keep the existing package declaration")
+            }
+            promptBuilder.appendLine("// complete new file content")
+            promptBuilder.appendLine("```")
+            promptBuilder.appendLine("Use `DELETE:path/to/file.kt` to remove existing files.")
+            promptBuilder.appendLine(
+                "Generate the actual implementation for the specification changes above. " +
+                    "Do NOT include explanations outside the code blocks."
+            )
+            return
+        }
+
         val examplePath = allowedRoots.firstOrNull()
             ?.let { "$it/com/example/GeneratedFeature.kt" }
             ?: "src/main/kotlin/com/example/UserController.kt"
 
-        promptBuilder.appendLine("## Response Format")
         promptBuilder.appendLine("Respond ONLY with markdown code blocks declaring the target file path after the language tag:")
         promptBuilder.appendLine("```kotlin:$examplePath")
         promptBuilder.appendLine("package com.example")
@@ -132,6 +184,14 @@ class PromptConstructor(private val rulesDir: File) {
         promptBuilder.appendLine("```")
         promptBuilder.appendLine("Use `MODIFY:path/to/file.kt` or `DELETE:path/to/file.kt` markers to change or remove existing files.")
         promptBuilder.appendLine("Generate the actual implementation for the specification changes above. Do NOT copy the example verbatim and do NOT include explanations outside the code blocks.")
+    }
+
+    private fun packageOf(filePath: String, allowedRoots: List<String>): String? {
+        val root = allowedRoots.firstOrNull { filePath.startsWith("$it/") } ?: return null
+        return filePath.removePrefix("$root/")
+            .substringBeforeLast('/', "")
+            .replace('/', '.')
+            .takeIf { it.isNotBlank() }
     }
 
     private fun appendSpecChanges(promptBuilder: StringBuilder, specChanges: List<SpecChange>) {
@@ -157,5 +217,6 @@ class PromptConstructor(private val rulesDir: File) {
 data class PromptGuidance(
     val specChanges: List<SpecChange> = emptyList(),
     val specTargets: List<SpecTarget> = emptyList(),
-    val allowedRoots: List<String> = emptyList()
+    val allowedRoots: List<String> = emptyList(),
+    val specRules: List<SpecRule> = emptyList()
 )

@@ -5,6 +5,7 @@ import com.designtocode.domain.CorrectionRequest
 import com.designtocode.domain.CorrectiveRetryOrchestrator
 import com.designtocode.domain.SpecTargetExtractor
 import com.designtocode.domain.model.OutputVerificationResult
+import com.designtocode.domain.model.SpecRule
 import com.designtocode.domain.model.SpecTarget
 import com.designtocode.domain.port.GenerationResult
 import org.slf4j.LoggerFactory
@@ -19,16 +20,20 @@ class OutputVerificationStage(
     private val verifier = injectedVerifier ?: GeneratedOutputVerifier(workspace, strictMode = config.strictMode)
 
     val resolvedRoots: List<String> = SourceRootValidator(workspace, config.allowedRoots).resolvedRoots
+    private val extractor by lazy { SpecTargetExtractor(workspace, resolvedRoots) }
 
     fun captureBaseline(): Set<String> = verifier.captureBaseline()
 
     fun extractTargets(changedFiles: List<String>): List<SpecTarget> {
-        val targets = SpecTargetExtractor(workspace, resolvedRoots).extract(changedFiles)
+        val targets = extractor.extract(changedFiles)
         targets.forEach {
             logger.info("Declared spec target: ${it.filePath} (symbol=${it.symbol}, exists=${it.exists})")
         }
         return targets
     }
+
+    fun extractRules(changedFiles: List<String>): List<SpecRule> =
+        extractor.extractRules(changedFiles)
 
     suspend fun verify(
         request: OutputVerificationRequest,
