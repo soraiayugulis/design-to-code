@@ -130,7 +130,31 @@ class PipelineOrchestratorTest {
 
         // Then
         assertFalse(result.success)
-        assertEquals("build failed", result.errorMessage)
+        assertTrue(result.errorMessage?.contains("build failed") == true)
+        assertTrue(gitOps.calls.isEmpty())
+    }
+
+    @Test
+    fun shouldDetectAndroidAndStopAtCompileCheckBeforeFullBuild() {
+        File(workspace, "build.gradle.kts").writeText("plugins { id(\"com.android.application\") }")
+        File(workspace, "gradlew").apply {
+            writeText("#!/bin/bash\necho \"\$1\" >> tasks.log\nif [ \"\$1\" = 'compileDebugKotlin' ]; then echo 'e: Unresolved reference: MissingAnnotation'; exit 1; fi\nexit 0\n")
+            setExecutable(true)
+        }
+        val aiAgent = FakeAiAgent(listOf(GenerationResult(success = true, generatedFiles = listOf("src/User.kt"))))
+        val gitOps = FakeGitOperations()
+        val result = PipelineOrchestrator(
+            workspace.absolutePath, listOf("design/openapi.yaml"), "test-model",
+            testConfig.copy(
+                qualityGate = testConfig.qualityGate.copy(maxBuildRetries = 0),
+                outputValidation = com.designtocode.config.OutputValidationConfig(enabled = false)
+            ),
+            PipelineDependencies(aiAgent = aiAgent, gitOperations = gitOps)
+        ).execute()
+
+        assertFalse(result.success)
+        assertTrue(result.errorMessage?.contains("MissingAnnotation") == true)
+        assertEquals(listOf("compileDebugKotlin"), File(workspace, "tasks.log").readLines())
         assertTrue(gitOps.calls.isEmpty())
     }
 

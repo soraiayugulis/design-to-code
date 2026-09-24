@@ -7,6 +7,7 @@ import com.designtocode.config.OutputValidationConfig
 import com.designtocode.config.PipelineConfig
 import com.designtocode.config.QualityGateConfig
 import com.designtocode.config.RetryConfig
+import com.designtocode.domain.model.QualityFailureCategory
 import com.designtocode.domain.model.QualityGateResult
 import com.designtocode.domain.port.AIAgentPort
 import com.designtocode.domain.port.GenerationResult
@@ -75,7 +76,12 @@ class PipelineOrchestratorOutputValidationTest {
             .waitFor(10, TimeUnit.SECONDS)
     }
 
-    private fun orchestrator(aiAgent: AIAgentPort, gitOps: GitOperationsPort, config: PipelineConfig = validationConfig) =
+    private fun orchestrator(
+        aiAgent: AIAgentPort,
+        gitOps: GitOperationsPort,
+        config: PipelineConfig = validationConfig,
+        qualityGate: QualityGatePort = PassingQualityGate()
+    ) =
         PipelineOrchestrator(
             workspacePath = workspace.absolutePath,
             changedFiles = listOf("design/change.yaml"),
@@ -84,7 +90,7 @@ class PipelineOrchestratorOutputValidationTest {
             dependencies = PipelineDependencies(
                 aiAgent = aiAgent,
                 gitOperations = gitOps,
-                qualityGate = PassingQualityGate()
+                qualityGate = qualityGate
             )
         )
 
@@ -179,13 +185,160 @@ class PipelineOrchestratorOutputValidationTest {
         assertTrue(gitOps.calls.contains("createPullRequest"))
     }
 
+    @Test
+    fun `should regenerate from compiler feedback and revalidate before git`() {
+        val aiAgent = WritingFakeAiAgent(
+            mapOf(targetPath to "class SettingsScreen { MissingAnnotation }"),
+            mapOf(targetPath to "class SettingsScreen { /* fixed */ }")
+        )
+        val gate = SequencedQualityGate(
+            QualityGateResult(false, false, 0.0, errorMessage = "Unresolved reference: MissingAnnotation", failureCategory = QualityFailureCategory.COMPILATION),
+            QualityGateResult(true, true, 95.0)
+        )
+        val gitOps = RecordingGitOps()
+
+        val result = orchestrator(aiAgent, gitOps, qualityGate = gate).execute()
+
+        assertTrue(result.success)
+        assertEquals(2, aiAgent.calls)
+        assertTrue(aiAgent.lastPrompt!!.contains("Unresolved reference: MissingAnnotation"))
+        assertEquals(2, gate.calls)
+        assertEquals("class SettingsScreen { /* v1 */ }", aiAgent.contentsBeforeWrite[1])
+        assertEquals("class SettingsScreen { /* fixed */ }", File(workspace, targetPath).readText())
+        assertTrue(gitOps.calls.contains("createPullRequest"))
+    }
+
+    @Test
+    fun `should recover from a real compile check with compiler feedback`() {
+        File(workspace, "gradlew").apply {
+            writeText(
+                "#!/bin/bash\necho \"\$1\" >> gradle-tasks.log\n" +
+                    "if [ \"\$1\" = 'compileDebugKotlin' ] && [[ \"\$(cat $targetPath)\" == *MissingAnnotation* ]]; then\n" +
+                    "  echo 'e: file:///app/src/main/java/com/example/SettingsScreen.kt:1:1 Unresolved reference: MissingAnnotation'\n" +
+                    "  exit 1\nfi\nexit 0\n"
+            )
+            setExecutable(true)
+        }
+        val aiAgent = WritingFakeAiAgent(
+            mapOf(targetPath to "class SettingsScreen { MissingAnnotation }"),
+            mapOf(targetPath to "class SettingsScreen { /* fixed */ }")
+        )
+        val config = validationConfig.copy(
+            qualityGate = validationConfig.qualityGate.copy(coverageThreshold = 0.0),
+            build = BuildConfig(compileTasks = listOf("compileDebugKotlin"))
+        )
+
+        val result = PipelineOrchestrator(
+            workspace.absolutePath, listOf("design/change.yaml"), "test-model", config,
+            PipelineDependencies(aiAgent = aiAgent, gitOperations = RecordingGitOps())
+        ).execute()
+
+        assertTrue(result.success)
+        assertEquals(2, aiAgent.calls)
+        assertTrue(aiAgent.lastPrompt!!.contains("Unresolved reference: MissingAnnotation"))
+        assertEquals(2, File(workspace, "gradle-tasks.log").readLines().count { it == "compileDebugKotlin" })
+        assertEquals(1, File(workspace, "gradle-tasks.log").readLines().count { it == "clean" })
+    }
+
+    @Test
+    fun `should stop retries after same compilation error`() {
+        val aiAgent = WritingFakeAiAgent(
+            mapOf(targetPath to "class SettingsScreen { MissingAnnotation }"),
+            mapOf(targetPath to "class SettingsScreen { MissingAnnotation again }")
+        )
+        val failure = QualityGateResult(false, false, 0.0, errorMessage = "Unresolved reference: MissingAnnotation", failureCategory = QualityFailureCategory.COMPILATION)
+        val gate = SequencedQualityGate(failure)
+        val gitOps = RecordingGitOps()
+
+        val result = orchestrator(aiAgent, gitOps, qualityGate = gate).execute()
+
+        assertFalse(result.success)
+        assertEquals(2, aiAgent.calls)
+        assertEquals(2, gate.calls)
+        assertTrue(result.errorMessage?.contains("Quality Gate Validation") == true)
+        assertTrue(result.errorMessage?.contains("COMPILATION") == true)
+        assertTrue(result.errorMessage?.contains("attempts=1") == true)
+        assertTrue(result.errorMessage?.contains(targetPath) == true)
+        assertTrue(gitOps.calls.isEmpty())
+    }
+
+    @Test
+    fun `should stop after configured build retry budget`() {
+        val aiAgent = WritingFakeAiAgent(
+            mapOf(targetPath to "class SettingsScreen { missing1 }"),
+            mapOf(targetPath to "class SettingsScreen { missing2 }"),
+            mapOf(targetPath to "class SettingsScreen { missing3 }")
+        )
+        val first = QualityGateResult(false, false, 0.0, errorMessage = "Unresolved reference: missing1", failureCategory = QualityFailureCategory.COMPILATION)
+        val second = first.copy(errorMessage = "Unresolved reference: missing2")
+        val third = first.copy(errorMessage = "Unresolved reference: missing3")
+        val gate = SequencedQualityGate(first, second, third)
+        val config = validationConfig.copy(qualityGate = validationConfig.qualityGate.copy(maxBuildRetries = 2))
+
+        val result = orchestrator(aiAgent, RecordingGitOps(), config, gate).execute()
+
+        assertFalse(result.success)
+        assertEquals(3, aiAgent.calls)
+        assertEquals(3, gate.calls)
+        assertTrue(result.errorMessage?.contains("attempts=2") == true)
+        assertEquals("class SettingsScreen { /* v1 */ }", File(workspace, targetPath).readText())
+    }
+
+    @Test
+    fun `should restore preexisting edits after terminal failure`() {
+        val target = File(workspace, targetPath)
+        target.writeText("class SettingsScreen { /* user draft */ }")
+        val aiAgent = WritingFakeAiAgent(mapOf(targetPath to "class SettingsScreen { /* broken */ }"))
+        val failure = QualityGateResult(false, true, 0.0, errorMessage = "Detekt failed", failureCategory = QualityFailureCategory.LINT)
+
+        val result = orchestrator(aiAgent, RecordingGitOps(), qualityGate = SequencedQualityGate(failure)).execute()
+
+        assertFalse(result.success)
+        assertEquals("class SettingsScreen { /* user draft */ }", target.readText())
+    }
+
+    @Test
+    fun `should remove new generated file after terminal failure`() {
+        val newFile = "app/src/main/java/com/example/Other.kt"
+        val aiAgent = WritingFakeAiAgent(
+            mapOf(targetPath to "class SettingsScreen { /* broken */ }", newFile to "class Other")
+        )
+        val failure = QualityGateResult(false, true, 0.0, errorMessage = "Detekt failed", failureCategory = QualityFailureCategory.LINT)
+
+        val result = orchestrator(aiAgent, RecordingGitOps(), qualityGate = SequencedQualityGate(failure)).execute()
+
+        assertFalse(result.success)
+        assertFalse(File(workspace, newFile).exists())
+        assertEquals("class SettingsScreen { /* v1 */ }", File(workspace, targetPath).readText())
+    }
+
+    @Test
+    fun `should not retry lint failures`() {
+        val aiAgent = WritingFakeAiAgent(mapOf(targetPath to "class SettingsScreen { /* v2 */ }"))
+        val gate = SequencedQualityGate(QualityGateResult(false, true, 0.0, errorMessage = "Detekt failed", failureCategory = QualityFailureCategory.LINT))
+
+        val result = orchestrator(aiAgent, RecordingGitOps(), qualityGate = gate).execute()
+
+        assertFalse(result.success)
+        assertEquals(1, aiAgent.calls)
+        assertEquals(1, gate.calls)
+    }
+
+    private class SequencedQualityGate(private vararg val results: QualityGateResult) : QualityGatePort {
+        var calls = 0
+        override fun validate(): QualityGateResult = results.getOrElse(calls++) { results.last() }
+    }
+
     private class WritingFakeAiAgent(
         private vararg val writesPerCall: Map<String, String>
     ) : AIAgentPort {
         var calls = 0
         var lastPrompt: String? = null
+        val contentsBeforeWrite = mutableListOf<String?>()
 
         override suspend fun generate(prompt: String, workspace: File): GenerationResult {
+            contentsBeforeWrite += File(workspace, "app/src/main/java/com/example/SettingsScreen.kt")
+                .takeIf { it.exists() }?.readText()
             lastPrompt = prompt
             val writes = writesPerCall.getOrElse(calls) { emptyMap() }
             calls++
