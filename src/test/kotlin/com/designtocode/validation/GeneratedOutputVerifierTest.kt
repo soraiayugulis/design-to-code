@@ -50,6 +50,29 @@ class GeneratedOutputVerifierTest {
     private fun existingTarget() = SpecTarget(targetPath, symbol = "LanguageOption", exists = true)
 
     @Test
+    fun `rollback refuses paths in excluded directories`() {
+        val ignored = File(workspace, ".gradle/private.txt").apply { parentFile.mkdirs(); writeText("preserve me") }
+        val snapshot = WorkspaceSnapshot(workspace, listOf("."))
+
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            snapshot.restore(setOf(".gradle/private.txt"))
+        }
+        assertEquals("preserve me", ignored.readText())
+    }
+
+    @Test
+    fun `rollback normalizes relative paths before restoring existing files`() {
+        val target = File(workspace, targetPath)
+        target.writeText("class SettingsScreen { /* user draft */ }")
+        val snapshot = WorkspaceSnapshot(workspace, listOf("app/src/main/java"))
+        target.writeText("class SettingsScreen { /* broken */ }")
+
+        snapshot.restore(setOf("./$targetPath"))
+
+        assertEquals("class SettingsScreen { /* user draft */ }", target.readText())
+    }
+
+    @Test
     fun `should pass when declared target is modified`() {
         // Given
         val baseline = verifier().captureBaseline()
