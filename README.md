@@ -32,6 +32,7 @@ The Design-to-Code AI Pipeline is a distributed Internal Developer Platform (IDP
 ## Features
 
 - **Automated Code Generation**: Transforms OpenAPI/Markdown specs to Kotlin code
+- **Generated Output Validation**: Writes restricted to allowed source roots; declared spec targets are verified after generation; bounded corrective retries on violations; the pipeline fails before Git/PR operations when targets are untouched
 - **Spec Change Analysis**: Parses the git diff of design specs into structured changes (section, change type, line ranges) to focus the prompt
 - **Hexagonal Architecture**: Clean separation of concerns with ports and adapters
 - **Quality Gates**: Configurable coverage threshold (default 90%), linting, and compilation checks
@@ -176,6 +177,20 @@ cd design-to-code
 | `--metrics-file` | Export pipeline metrics to a file |
 
 `changedFiles` accepts a comma-separated list of design spec paths (e.g. `design/api.yaml,design/model.md`).
+
+### Output Validation
+
+The `outputValidation` section of `pipeline.yml` controls generated-output grounding and verification:
+
+```yaml
+outputValidation:
+  enabled: true              # verify generated output before Git/PR operations
+  strictMode: false          # treat unexpected generated files as fatal violations
+  maxCorrectiveRetries: 2    # bounded corrective attempts with violation feedback
+  allowedRoots: []           # relative source roots; empty = auto-detect **/src/{main,test}/{java,kotlin}
+```
+
+Specs may declare `target.file` (plus an optional symbol like `composable`) to state which file the change must land in; the pipeline fails before branch/commit/PR when a declared target is not modified. See `pipeline.yml.example` and `docs/adr/spec-generated-output-validation.md`.
 
 ## Development
 
