@@ -82,6 +82,23 @@ class PipelineOrchestratorTest {
     }
 
     @Test
+    fun shouldNotRetryGenerationReadTimeout() {
+        // Given — a read/generation timeout is deterministic for the same workload; retrying reproduces it
+        val aiAgent = FakeAiAgent(
+            listOf(GenerationResult(success = false, generatedFiles = emptyList(), errorMessage = "Read timed out"))
+        )
+        val gitOps = FakeGitOperations()
+
+        // When
+        val result = orchestrator(aiAgent, gitOps, FakeQualityGate(passedResult())).execute()
+
+        // Then — fails fast instead of burning another full timeout budget on an identical call
+        assertFalse(result.success)
+        assertEquals(1, aiAgent.calls)
+        assertTrue(gitOps.calls.isEmpty())
+    }
+
+    @Test
     fun shouldNotRetryNonTransientAiError() {
         // Given
         val aiAgent = FakeAiAgent(

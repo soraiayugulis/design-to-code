@@ -49,6 +49,12 @@ class PipelineOrchestrator(
     private val retryHelper = RetryHelper(config.retry)
     private val metricsCollector = MetricsCollector()
 
+    // Read/generation timeouts are deterministic for the same prompt — retrying reproduces the
+    // same duration and burns another full timeout budget. Connection-level failures
+    // (refused, reset, gateway errors) are genuinely transient.
+    private val deterministicTimeoutPattern = Regex("read timed out|generation timeout")
+    private val transientErrorPattern = Regex("connection|connect timed out|network|502|503|504")
+
     private val verificationStage: OutputVerificationStage? by lazy {
         if (!config.outputValidation.enabled) {
             null
@@ -245,7 +251,8 @@ class PipelineOrchestrator(
             port = config.ai.port,
             model = ollamaModel,
             timeoutMs = config.ai.timeoutMs,
-            allowedRoots = verificationStage?.resolvedRoots
+            allowedRoots = verificationStage?.resolvedRoots,
+            numCtx = config.ai.numCtx
         )
 
         val aiResult = retryHelper.retryWithBackoff(
@@ -259,13 +266,8 @@ class PipelineOrchestrator(
             },
             isTransientFailure = { throwable ->
                 val message = throwable.message?.lowercase() ?: ""
-                message.contains("timeout") ||
-                message.contains("timed out") ||
-                message.contains("connection") ||
-                message.contains("network") ||
-                message.contains("503") ||
-                message.contains("502") ||
-                message.contains("504")
+                !deterministicTimeoutPattern.containsMatchIn(message) &&
+                    transientErrorPattern.containsMatchIn(message)
             }
         )
 
