@@ -24,6 +24,7 @@ class ConfigLoaderTest {
               port: 11434
               model: codellama:13b
               timeoutMs: 300000
+              numCtx: 32768
             git:
               branchPrefix: feature/ai-gen
               commitMessageFormat: conventional
@@ -47,6 +48,7 @@ class ConfigLoaderTest {
         assertEquals(11434, config.ai.port)
         assertEquals("codellama:13b", config.ai.model)
         assertEquals(300000L, config.ai.timeoutMs)
+        assertEquals(32768, config.ai.numCtx)
         assertEquals("feature/ai-gen", config.git.branchPrefix)
         assertEquals("conventional", config.git.commitMessageFormat)
         assertEquals(95.0, config.qualityGate.coverageThreshold)

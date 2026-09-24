@@ -5,7 +5,14 @@ ai:
   host: localhost
   port: 11434
   model: codellama:13b
+  # Total generation budget per call. On CPU-only runners (e.g. GitHub Actions),
+  # a ~20k-char prompt can take far longer than on a GPU machine — size this
+  # accordingly (e.g. 1800000 = 30min).
   timeoutMs: 300000
+  # Optional: Ollama context window override (sent as options.num_ctx).
+  # Set when prompts approach or exceed the model's default context; otherwise
+  # Ollama silently truncates the prompt.
+  # numCtx: 32768
 
 git:
   branchPrefix: feature/ai-gen

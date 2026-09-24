@@ -13,7 +13,8 @@ data class AIConfig(
     val host: String = "localhost",
     val port: Int = 11434,
     val model: String = "codellama:13b",
-    val timeoutMs: Long = 300000L
+    val timeoutMs: Long = 300000L,
+    val numCtx: Int? = null
 )
 
 data class GitConfig(
