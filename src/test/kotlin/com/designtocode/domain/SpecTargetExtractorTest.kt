@@ -238,6 +238,101 @@ class SpecTargetExtractorTest {
     }
 
     @Test
+    fun `should resolve symbol declaration line when target exists`() {
+        // Given
+        val file = File(workspace, "app/src/main/java/com/example/SettingsScreen.kt")
+        file.parentFile?.mkdirs()
+        file.writeText(
+            """
+            package com.example
+
+            class SettingsScreen {
+                fun render() {}
+            }
+
+            private fun LanguageOption() {}
+            """.trimIndent()
+        )
+        val spec = writeSpec("symbol-line.yaml", """
+            feature: f
+            target:
+              file: app/src/main/java/com/example/SettingsScreen.kt
+              function: LanguageOption
+        """)
+        val extractor = SpecTargetExtractor(workspace, allowedRoots)
+
+        // When
+        val targets = extractor.extract(listOf(spec))
+
+        // Then
+        assertEquals(7, targets[0].symbolLine)
+    }
+
+    @Test
+    fun `should leave symbolLine null when symbol is absent or not found`() {
+        // Given
+        writeTarget("app/src/main/java/com/example/SettingsScreen.kt")
+        val spec = writeSpec("no-symbol-line.yaml", """
+            feature: f
+            target:
+              file: app/src/main/java/com/example/SettingsScreen.kt
+        """)
+        val extractor = SpecTargetExtractor(workspace, allowedRoots)
+
+        // When
+        val targets = extractor.extract(listOf(spec))
+
+        // Then
+        assertNull(targets[0].symbolLine)
+    }
+
+    @Test
+    fun `should extract rules with id when and then clauses`() {
+        // Given
+        val spec = writeSpec("rules.yaml", """
+            feature: f
+            rules:
+              - id: LANGCOLOR-1
+                when: a language option is selected
+                then: its text color is DarkBlue
+              - id: LANGCOLOR-2
+                then: nothing else changes
+        """)
+        val extractor = SpecTargetExtractor(workspace, allowedRoots)
+
+        // When
+        val rules = extractor.extractRules(listOf(spec))
+
+        // Then
+        assertEquals(2, rules.size)
+        assertEquals("LANGCOLOR-1", rules[0].id)
+        assertEquals("a language option is selected", rules[0].whenClause)
+        assertEquals("its text color is DarkBlue", rules[0].thenClause)
+        assertEquals("LANGCOLOR-2", rules[1].id)
+        assertNull(rules[1].whenClause)
+    }
+
+    @Test
+    fun `should return empty rules when spec has none and skip malformed entries`() {
+        // Given
+        val spec = writeSpec("bad-rules.yaml", """
+            feature: f
+            rules:
+              - just a string
+              - id: OK-1
+                then: valid
+        """)
+        val extractor = SpecTargetExtractor(workspace, allowedRoots)
+
+        // When
+        val rules = extractor.extractRules(listOf(spec))
+
+        // Then — only well-formed entries are collected
+        assertEquals(1, rules.size)
+        assertEquals("OK-1", rules[0].id)
+    }
+
+    @Test
     fun `should fail when spec file does not exist`() {
         // Given
         val extractor = SpecTargetExtractor(workspace, allowedRoots)
