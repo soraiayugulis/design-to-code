@@ -59,7 +59,8 @@ class ConfigLoader {
             host = aiMap["host"] as? String ?: "localhost",
             port = aiMap["port"] as? Int ?: 11434,
             model = aiMap["model"] as? String ?: "codellama:13b",
-            timeoutMs = (aiMap["timeoutMs"] as? Int)?.toLong() ?: aiMap["timeoutMs"] as? Long ?: 300000L
+            timeoutMs = (aiMap["timeoutMs"] as? Int)?.toLong() ?: aiMap["timeoutMs"] as? Long ?: 300000L,
+            numCtx = (aiMap["numCtx"] as? Int) ?: (aiMap["numCtx"] as? Long)?.toInt()
         )
     }
 

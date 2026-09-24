@@ -2,7 +2,7 @@ package com.designtocode.domain.adapter
 
 import com.google.gson.JsonParser
 import com.sun.net.httpserver.HttpServer
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,17 +30,36 @@ class OllamaAdapterHttpTest {
     private var responseStatus: Int = HTTP_OK
     private var responseBody: String = "{}"
 
+    private var trickleResponse: Boolean = false
+
     @BeforeEach
     fun startServer() {
         server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         port = server.address.port
         server.createContext("/api/generate") { exchange ->
             lastRequestBody = exchange.requestBody.bufferedReader().use { it.readText() }
-            val bytes = responseBody.toByteArray()
-            exchange.sendResponseHeaders(responseStatus, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
+            if (trickleResponse) {
+                sendTrickledBody(exchange)
+            } else {
+                val bytes = responseBody.toByteArray()
+                exchange.sendResponseHeaders(responseStatus, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
         }
         server.start()
+    }
+
+    private fun sendTrickledBody(exchange: com.sun.net.httpserver.HttpExchange) {
+        // Each write stays under the per-read socket timeout, but total duration exceeds the
+        // generation budget — this is the case a total timeout must still abort.
+        exchange.sendResponseHeaders(HTTP_OK, 0)
+        exchange.responseBody.use { body ->
+            repeat(6) {
+                body.write("{\"response\":\"chunk$it".toByteArray())
+                body.flush()
+                Thread.sleep(200)
+            }
+        }
     }
 
     @AfterEach
@@ -49,7 +68,7 @@ class OllamaAdapterHttpTest {
     }
 
     @Test
-    fun shouldWriteFileDeclaredInOllamaJsonResponse() = runTest {
+    fun shouldWriteFileDeclaredInOllamaJsonResponse() = runBlocking {
         responseBody = """{"response":"```kotlin:src/Hello.kt\nclass Hello\n```","done":true}"""
         val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS)
 
@@ -61,7 +80,7 @@ class OllamaAdapterHttpTest {
     }
 
     @Test
-    fun shouldSendWellFormedJsonRequestWithHostileCharacters() = runTest {
+    fun shouldSendWellFormedJsonRequestWithHostileCharacters() = runBlocking {
         responseBody = """{"response":"","done":true}"""
         val adapter = OllamaAdapter("127.0.0.1", port, "codellama:13b", timeoutMs = TEST_TIMEOUT_MS)
         val hostilePrompt = "Generate a class with \"quotes\"\nand newlines \\ and backslash"
@@ -75,7 +94,7 @@ class OllamaAdapterHttpTest {
     }
 
     @Test
-    fun shouldFailOnHttpErrorResponse() = runTest {
+    fun shouldFailOnHttpErrorResponse() = runBlocking {
         responseStatus = HTTP_ERROR
         responseBody = "internal error"
         val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS)
@@ -87,7 +106,43 @@ class OllamaAdapterHttpTest {
     }
 
     @Test
-    fun shouldFailWhenResponseHasNoFilesInExpectedFormat() = runTest {
+    fun shouldAbortWhenTotalDurationExceedsTimeoutEvenIfBytesTrickle() = runBlocking {
+        // Given — response bytes arrive in bursts shorter than the per-read socket timeout
+        trickleResponse = true
+        val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = 600)
+
+        // When
+        val result = adapter.generate("prompt", workspace)
+
+        // Then — total budget is enforced, not just per-read timeout
+        assertFalse(result.success)
+        assertTrue(result.errorMessage?.contains("timeout") == true)
+    }
+
+    @Test
+    fun shouldSendNumCtxOptionWhenConfigured() = runBlocking {
+        responseBody = """{"response":"","done":true}"""
+        val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS, numCtx = 32768)
+
+        adapter.generate("prompt", workspace)
+
+        val parsed = JsonParser.parseString(lastRequestBody).asJsonObject
+        assertEquals(32768, parsed.getAsJsonObject("options").get("num_ctx").asInt)
+    }
+
+    @Test
+    fun shouldOmitOptionsWhenNumCtxNotConfigured() = runBlocking {
+        responseBody = """{"response":"","done":true}"""
+        val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS)
+
+        adapter.generate("prompt", workspace)
+
+        val parsed = JsonParser.parseString(lastRequestBody).asJsonObject
+        assertFalse(parsed.has("options"))
+    }
+
+    @Test
+    fun shouldFailWhenResponseHasNoFilesInExpectedFormat() = runBlocking {
         responseBody = """{"response":"some prose without any code block","done":true}"""
         val adapter = OllamaAdapter("127.0.0.1", port, "test-model", timeoutMs = TEST_TIMEOUT_MS)
 
