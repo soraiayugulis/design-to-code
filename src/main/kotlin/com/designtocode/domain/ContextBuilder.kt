@@ -22,6 +22,8 @@ class ContextBuilder(private val buildFile: File) {
 
     private fun detectTechStack(content: String): TechStack {
         return when {
+            content.contains("com.android.application") -> TechStack.ANDROID
+            content.contains("com.android.library") -> TechStack.ANDROID
             content.contains("org.springframework.boot") -> TechStack.SPRING_BOOT
             content.contains("io.quarkus") -> TechStack.QUARKUS
             else -> TechStack.UNKNOWN
@@ -40,8 +42,17 @@ class ContextBuilder(private val buildFile: File) {
         return when (techStack) {
             TechStack.SPRING_BOOT -> extractVersion(content, "org.springframework.boot:spring-boot-starter")
             TechStack.QUARKUS -> extractVersion(content, "io.quarkus:quarkus-core")
+            TechStack.ANDROID -> extractAndroidPluginVersion(content)
             TechStack.UNKNOWN -> "unknown"
         }
+    }
+
+    private fun extractAndroidPluginVersion(content: String): String {
+        val pluginBlockPattern =
+            """com\.android\.(?:application|library)["'\s)]*\s*version\s*["']([^"']+)""".toRegex()
+        val pluginMatch = pluginBlockPattern.find(content)
+        if (pluginMatch != null) return pluginMatch.groupValues[1]
+        return extractVersion(content, "com.android.tools.build:gradle")
     }
 
     private fun extractVersion(content: String, dependency: String): String {

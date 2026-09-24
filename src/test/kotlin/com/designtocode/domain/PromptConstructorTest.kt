@@ -102,6 +102,48 @@ class PromptConstructorTest {
     }
 
     @Test
+    fun shouldUseBundledAndroidRulesWhenWorkspaceLacksThem() {
+        // Given — no rules/android-rules.md in the workspace
+        val rulesDir = File(tempDir, "rules")
+        rulesDir.mkdirs()
+
+        val projectContext = ProjectContext(
+            techStack = TechStack.ANDROID,
+            database = DatabaseType.UNKNOWN,
+            frameworkVersion = "8.2.0"
+        )
+        val promptConstructor = PromptConstructor(rulesDir)
+
+        // When
+        val prompt = promptConstructor.constructPrompt(projectContext, listOf("design/change.yaml"))
+
+        // Then — bundled default rules are injected
+        assertTrue(prompt.contains("Android"))
+        assertTrue(prompt.contains("app/src/main"))
+    }
+
+    @Test
+    fun shouldPreferWorkspaceAndroidRulesOverBundled() {
+        // Given — workspace provides its own android rules
+        val rulesDir = File(tempDir, "rules")
+        rulesDir.mkdirs()
+        File(rulesDir, "android-rules.md").writeText("# Custom Android Rules\n\n- Always use Compose")
+
+        val projectContext = ProjectContext(
+            techStack = TechStack.ANDROID,
+            database = DatabaseType.UNKNOWN,
+            frameworkVersion = "8.2.0"
+        )
+        val promptConstructor = PromptConstructor(rulesDir)
+
+        // When
+        val prompt = promptConstructor.constructPrompt(projectContext, listOf("design/change.yaml"))
+
+        // Then — workspace file wins over the bundled default
+        assertTrue(prompt.contains("Always use Compose"))
+    }
+
+    @Test
     fun shouldConstructPromptWithMultipleSpecFiles() {
         // Given
         val rulesDir = File(tempDir, "rules")

@@ -23,15 +23,19 @@ class PromptConstructor(private val rulesDir: File) {
             promptBuilder.appendLine()
         }
         
-        // Add framework-specific rules
-        val frameworkRulesFile = when (projectContext.techStack) {
-            TechStack.SPRING_BOOT -> File(rulesDir, "spring-boot-rules.md")
-            TechStack.QUARKUS -> File(rulesDir, "quarkus-rules.md")
+        // Add framework-specific rules (workspace file wins; bundled default as fallback)
+        val frameworkRulesName = when (projectContext.techStack) {
+            TechStack.SPRING_BOOT -> "spring-boot-rules.md"
+            TechStack.QUARKUS -> "quarkus-rules.md"
+            TechStack.ANDROID -> "android-rules.md"
             TechStack.UNKNOWN -> null
         }
-        frameworkRulesFile?.takeIf { it.exists() }?.let {
-            promptBuilder.appendLine(it.readText())
-            promptBuilder.appendLine()
+        frameworkRulesName?.let { name ->
+            val content = File(rulesDir, name).takeIf { it.exists() }?.readText() ?: bundledRules(name)
+            content?.let {
+                promptBuilder.appendLine(it)
+                promptBuilder.appendLine()
+            }
         }
         
         // Add project context
@@ -102,6 +106,9 @@ class PromptConstructor(private val rulesDir: File) {
             promptBuilder.appendLine()
         }
     }
+
+    private fun bundledRules(fileName: String): String? =
+        javaClass.getResource("/rules/$fileName")?.readText()
 
     private fun targetContent(workspace: File, target: SpecTarget): String {
         val content = File(workspace, target.filePath).readText()

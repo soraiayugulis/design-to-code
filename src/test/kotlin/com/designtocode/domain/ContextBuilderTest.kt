@@ -89,6 +89,48 @@ class ContextBuilderTest {
     }
 
     @Test
+    fun shouldDetectAndroidApplicationPlugin() {
+        // Given
+        val buildFile = File(tempDir, "build.gradle.kts")
+        buildFile.writeText(
+            """
+            plugins {
+                id("com.android.application") version "8.2.0"
+                id("org.jetbrains.kotlin.android")
+            }
+            """.trimIndent()
+        )
+        val contextBuilder = ContextBuilder(buildFile)
+
+        // When
+        val context = contextBuilder.buildContext()
+
+        // Then
+        assertEquals(TechStack.ANDROID, context.techStack)
+        assertEquals("8.2.0", context.frameworkVersion)
+    }
+
+    @Test
+    fun shouldDetectAndroidLibraryPlugin() {
+        // Given
+        val buildFile = File(tempDir, "build.gradle.kts")
+        buildFile.writeText(
+            """
+            plugins {
+                id("com.android.library")
+            }
+            """.trimIndent()
+        )
+        val contextBuilder = ContextBuilder(buildFile)
+
+        // When
+        val context = contextBuilder.buildContext()
+
+        // Then
+        assertEquals(TechStack.ANDROID, context.techStack)
+    }
+
+    @Test
     fun shouldHandleUnknownStackGracefully() {
         // Given
         val buildFile = File(tempDir, "build.gradle.kts")
