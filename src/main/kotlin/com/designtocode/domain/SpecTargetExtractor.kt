@@ -1,5 +1,6 @@
 package com.designtocode.domain
 
+import com.designtocode.domain.model.SpecRule
 import com.designtocode.domain.model.SpecTarget
 import org.slf4j.LoggerFactory
 import org.yaml.snakeyaml.Yaml
@@ -18,6 +19,20 @@ class SpecTargetExtractor(
         return specFiles.mapNotNull { extractTarget(it) }
     }
 
+    fun extractRules(specFiles: List<String>): List<SpecRule> {
+        return specFiles.flatMap { specPath ->
+            val specFile = requireSpecFile(specPath)
+            val document = yaml.load<Any?>(specFile.readText()) as? Map<*, *> ?: return@flatMap emptyList()
+            val rules = document["rules"] as? List<*> ?: return@flatMap emptyList()
+            rules.mapNotNull { entry ->
+                val map = entry as? Map<*, *> ?: return@mapNotNull null
+                val id = map["id"] as? String ?: return@mapNotNull null
+                val thenClause = map["then"] as? String ?: return@mapNotNull null
+                SpecRule(id = id, whenClause = map["when"] as? String, thenClause = thenClause)
+            }
+        }
+    }
+
     private fun extractTarget(specPath: String): SpecTarget? {
         val specFile = requireSpecFile(specPath)
 
@@ -31,9 +46,20 @@ class SpecTargetExtractor(
 
         val symbol = SYMBOL_KEYS.firstNotNullOfOrNull { targetMap[it] as? String }
         val exists = File(workspace, filePath).exists()
+        val symbolLine = symbol?.takeIf { exists }?.let { findSymbolLine(File(workspace, filePath), it) }
 
         logger.info("Spec target declared in $specPath: file=$filePath, symbol=$symbol, exists=$exists")
-        return SpecTarget(filePath = filePath, symbol = symbol, exists = exists)
+        return SpecTarget(filePath = filePath, symbol = symbol, exists = exists, symbolLine = symbolLine)
+    }
+
+    private fun findSymbolLine(file: File, symbol: String): Int? {
+        val pattern = Regex("""\b(?:fun|class|object|interface)\s+${Regex.escape(symbol)}\b""")
+        file.useLines { lines ->
+            lines.forEachIndexed { index, line ->
+                if (pattern.containsMatchIn(line)) return index + 1
+            }
+        }
+        return null
     }
 
     private fun requireSpecFile(specPath: String): File {

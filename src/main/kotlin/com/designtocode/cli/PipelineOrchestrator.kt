@@ -79,8 +79,9 @@ class PipelineOrchestrator(
             val projectContext = runStage(metrics, "Context Analysis") { executeContextAnalysis() }
             val specChanges = runStage(metrics, "Spec Change Analysis") { executeSpecChangeAnalysis() }
             val specTargets = stage?.extractTargets(changedFiles) ?: emptyList()
+            val specRules = stage?.extractRules(changedFiles) ?: emptyList()
             val prompt = runStage(metrics, "Prompt Construction") {
-                executePromptConstruction(projectContext, specChanges, specTargets, stage?.resolvedRoots ?: emptyList())
+                executePromptConstruction(projectContext, specChanges, specTargets, stage?.resolvedRoots ?: emptyList(), specRules)
             }
             val aiResult = runStage(metrics, "AI Generation", { it.success }) { executeAIGeneration(prompt) }
             if (!aiResult.success) {
@@ -208,7 +209,8 @@ class PipelineOrchestrator(
         projectContext: com.designtocode.domain.model.ProjectContext,
         specChanges: List<SpecChange>,
         specTargets: List<SpecTarget>,
-        allowedRoots: List<String>
+        allowedRoots: List<String>,
+        specRules: List<com.designtocode.domain.model.SpecRule>
     ): String {
         logger.info("[Stage 3] Prompt Construction")
         val rulesDir = File(workspacePath, "rules")
@@ -219,11 +221,14 @@ class PipelineOrchestrator(
             projectContext,
             changedFiles,
             File(workspacePath),
-            PromptGuidance(specChanges = specChanges, specTargets = specTargets, allowedRoots = allowedRoots)
+            PromptGuidance(
+                specChanges = specChanges, specTargets = specTargets,
+                allowedRoots = allowedRoots, specRules = specRules
+            )
         )
         logger.info(
             "Prompt constructed with ${changedFiles.size} spec files, ${specChanges.size} detected changes, " +
-                "${specTargets.size} declared targets, ${allowedRoots.size} allowed roots"
+                "${specTargets.size} declared targets, ${allowedRoots.size} allowed roots, ${specRules.size} rules"
         )
         logger.debug("Prompt length: ${prompt.length} characters")
         logger.info("=== Generated Prompt ===\n$prompt\n=== End of Prompt ===")
