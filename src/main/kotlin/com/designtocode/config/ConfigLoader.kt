@@ -40,13 +40,17 @@ class ConfigLoader {
         val qualityGateConfig = parseQualityGateConfig(configMap["qualityGate"] as? Map<String, Any> ?: emptyMap())
         val buildConfig = parseBuildConfig(configMap["build"] as? Map<String, Any> ?: emptyMap())
         val retryConfig = parseRetryConfig(configMap["retry"] as? Map<String, Any> ?: emptyMap())
+        val outputValidationConfig = parseOutputValidationConfig(
+            configMap["outputValidation"] as? Map<String, Any> ?: emptyMap()
+        )
 
         return PipelineConfig(
             ai = aiConfig,
             git = gitConfig,
             qualityGate = qualityGateConfig,
             build = buildConfig,
-            retry = retryConfig
+            retry = retryConfig,
+            outputValidation = outputValidationConfig
         )
     }
 
@@ -91,6 +95,17 @@ class ConfigLoader {
         return BuildConfig(
             gradleTasks = gradleTasks,
             useDaemon = buildMap["useDaemon"] as? Boolean ?: false
+        )
+    }
+
+    private fun parseOutputValidationConfig(validationMap: Map<String, Any>): OutputValidationConfig {
+        return OutputValidationConfig(
+            enabled = validationMap["enabled"] as? Boolean ?: true,
+            strictMode = validationMap["strictMode"] as? Boolean ?: false,
+            maxCorrectiveRetries = (validationMap["maxCorrectiveRetries"] as? Int)
+                ?: (validationMap["maxCorrectiveRetries"] as? Long)?.toInt()
+                ?: 2,
+            allowedRoots = (validationMap["allowedRoots"] as? List<*>)?.map { it.toString() } ?: emptyList()
         )
     }
 

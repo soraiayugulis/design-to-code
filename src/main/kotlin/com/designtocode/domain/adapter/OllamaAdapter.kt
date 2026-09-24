@@ -15,13 +15,12 @@ class OllamaAdapter(
     private val host: String,
     private val port: Int,
     private val model: String,
-    private val timeoutMs: Long = 300000L
+    private val timeoutMs: Long = 300000L,
+    private val allowedRoots: List<String>? = null
 ) : AIAgentPort {
     companion object {
         private const val CONNECTION_TIMEOUT_MS = 5000
         private const val HTTP_SUCCESS_CODE = 200
-        private const val FILE_PATH_GROUP_INDEX = 2
-        private const val FILE_CONTENT_GROUP_INDEX = 3
     }
 
     private val logger = LoggerFactory.getLogger(OllamaAdapter::class.java)
@@ -32,23 +31,27 @@ class OllamaAdapter(
         logger.info("Ollama configuration: host=$host, port=$port, model=$model, timeout=${timeoutMs}ms")
         logger.debug("Workspace: ${workspace.absolutePath}")
         logger.debug("Prompt length: ${prompt.length} characters")
-        
+
         return try {
             withTimeout(timeoutMs) {
                 val response = callOllamaAPI(prompt)
                 if (response.success) {
                     logger.info("Ollama API call succeeded")
                     logger.debug("Response content length: ${response.content?.length ?: 0} characters")
-                    val generatedFiles = parseGeneratedFiles(response.content ?: "", workspace)
-                    logger.info("Generated ${generatedFiles.size} files")
-                    if (generatedFiles.isEmpty()) {
+                    val parsed = GeneratedResponseParser(workspace, allowedRoots).parse(response.content ?: "")
+                    logger.info("Generated ${parsed.written.size} files, rejected ${parsed.rejected.size} files")
+                    if (parsed.written.isEmpty() && parsed.rejected.isEmpty()) {
                         GenerationResult(
                             success = false,
                             generatedFiles = emptyList(),
                             errorMessage = "AI response contained no files in the expected format"
                         )
                     } else {
-                        GenerationResult(success = true, generatedFiles = generatedFiles)
+                        GenerationResult(
+                            success = true,
+                            generatedFiles = parsed.written,
+                            rejectedFiles = parsed.rejected
+                        )
                     }
                 } else {
                     logger.error("Ollama API call failed: ${response.error}")
@@ -112,117 +115,6 @@ class OllamaAdapter(
         } catch (e: Exception) {
             logger.warn("Could not parse Ollama JSON response, using raw body")
             responseBody
-        }
-    }
-
-    private fun parseGeneratedFiles(content: String, workspace: File): List<String> {
-        val generatedFiles = mutableListOf<String>()
-        
-        try {
-            // Parse file deletion markers
-            // Expected format: DELETE:path/to/file.kt
-            val deleteRegex = Regex("""DELETE:([^\n]+)""")
-            deleteRegex.findAll(content).forEach { match ->
-                val filePath = match.groupValues[1]
-                if (isPathSafe(filePath, workspace)) {
-                    val file = File(workspace, filePath)
-                    if (file.exists()) {
-                        file.delete()
-                    }
-                }
-            }
-            
-            // Parse file modification markers
-            // Expected format: MODIFY:path/to/file.kt[:line-range]
-            val modifyRegex = Regex("""MODIFY:([^\n:]+)(?::(\d+-\d+))?""")
-            modifyRegex.findAll(content).forEach { match ->
-                val filePath = match.groupValues[1]
-                val lineRange = match.groupValues[2]
-                
-                if (isPathSafe(filePath, workspace)) {
-                    val file = File(workspace, filePath)
-                    if (file.exists()) {
-                        // Find the code block after the MODIFY marker
-                        val escapedPath = Regex.escape(filePath)
-                        val rangePattern = if (lineRange.isNotEmpty()) ":${Regex.escape(lineRange)}" else ""
-                        val codeBlockRegex = Regex("""MODIFY:$escapedPath$rangePattern\n```(\w+)\n([\s\S]*?)```""")
-                        val codeMatch = codeBlockRegex.find(content)
-                        
-                        if (codeMatch != null) {
-                            val newContent = codeMatch.groupValues[2]
-                            
-                            if (lineRange.isNotEmpty()) {
-                                // Modify specific lines
-                                modifyFileLines(file, lineRange, newContent)
-                            } else {
-                                // Replace entire file
-                                file.writeText(newContent)
-                            }
-                            generatedFiles.add(filePath)
-                        }
-                    }
-                }
-            }
-            
-            // Parse AI response for markdown code blocks with file paths
-            // Expected format: ```kotlin:path/to/file.kt
-            val codeBlockRegex = Regex("""```(\w+):([^\n]+)\n([\s\S]*?)```""")
-            val matches = codeBlockRegex.findAll(content)
-            
-            for (match in matches) {
-                val filePath = match.groupValues[FILE_PATH_GROUP_INDEX]
-                val fileContent = match.groupValues[FILE_CONTENT_GROUP_INDEX]
-                
-                // Validate file path is within workspace
-                if (isPathSafe(filePath, workspace)) {
-                    val file = File(workspace, filePath)
-                    file.parentFile?.mkdirs()
-                    file.writeText(fileContent)
-                    generatedFiles.add(filePath)
-                }
-            }
-        } catch (e: Exception) {
-            // Handle malformed responses gracefully
-            // Log error but don't fail the entire operation
-        }
-        
-        return generatedFiles
-    }
-    
-    private fun modifyFileLines(file: File, lineRange: String, newContent: String) {
-        try {
-            val lines = file.readLines()
-            val rangeParts = lineRange.split("-")
-            val startLine = rangeParts[0].toInt() - 1 // Convert to 0-indexed
-            val endLine = rangeParts[1].toInt() - 1
-            
-            if (startLine >= 0 && endLine < lines.size && startLine <= endLine) {
-                val newLines = newContent.lines()
-                val updatedLines = lines.toMutableList()
-                
-                // Replace the specified line range
-                updatedLines.subList(startLine, endLine + 1).clear()
-                updatedLines.addAll(startLine, newLines)
-                
-                file.writeText(updatedLines.joinToString("\n"))
-            }
-        } catch (e: Exception) {
-            // Handle modification errors gracefully
-        }
-    }
-
-    private fun isPathSafe(filePath: String, workspace: File): Boolean {
-        return try {
-            val file = File(workspace, filePath)
-            val canonicalWorkspace = workspace.canonicalPath
-            val canonicalFile = file.canonicalPath
-            
-            // Check if the file is within the workspace
-            canonicalFile.startsWith(canonicalWorkspace) && 
-            !filePath.contains("..") && 
-            !filePath.startsWith("/")
-        } catch (e: Exception) {
-            false
         }
     }
 

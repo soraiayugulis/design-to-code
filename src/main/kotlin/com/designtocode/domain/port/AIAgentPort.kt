@@ -9,5 +9,11 @@ interface AIAgentPort {
 data class GenerationResult(
     val success: Boolean,
     val generatedFiles: List<String>,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val rejectedFiles: List<RejectedFile> = emptyList()
+)
+
+data class RejectedFile(
+    val filePath: String,
+    val reason: String
 )

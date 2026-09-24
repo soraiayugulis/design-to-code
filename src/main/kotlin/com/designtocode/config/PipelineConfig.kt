@@ -5,7 +5,8 @@ data class PipelineConfig(
     val git: GitConfig,
     val qualityGate: QualityGateConfig,
     val build: BuildConfig,
-    val retry: RetryConfig = RetryConfig()
+    val retry: RetryConfig = RetryConfig(),
+    val outputValidation: OutputValidationConfig = OutputValidationConfig()
 )
 
 data class AIConfig(
@@ -37,4 +38,11 @@ data class RetryConfig(
     val initialDelayMs: Long = 1000L,
     val maxDelayMs: Long = 10000L,
     val backoffMultiplier: Double = 2.0
+)
+
+data class OutputValidationConfig(
+    val enabled: Boolean = true,
+    val strictMode: Boolean = false,
+    val maxCorrectiveRetries: Int = 2,
+    val allowedRoots: List<String> = emptyList()
 )

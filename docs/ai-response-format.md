@@ -16,18 +16,14 @@ The AI model should respond with markdown code blocks that include the file path
 
 ### Example
 
-```kotlin:src/main/kotlin/com/example/UserController.kt
-package com.example
+File paths must live under an allowed output root (see *Security Constraints*). For an Android app module, for example:
 
-import org.springframework.web.bind.annotation.*
+```kotlin:app/src/main/java/com/example/settings/SettingsScreen.kt
+package com.example.settings
 
-@RestController
-@RequestMapping("/api/users")
-class UserController {
-    @GetMapping
-    fun getAllUsers(): List<User> {
-        // implementation
-    }
+@Composable
+fun SettingsScreen() {
+    // implementation
 }
 ```
 
@@ -44,23 +40,27 @@ The parser enforces the following security constraints:
 1. **Path Traversal Prevention**: File paths cannot contain `..` to prevent directory traversal attacks
 2. **Absolute Path Prevention**: File paths cannot start with `/` to ensure they are relative to the workspace
 3. **Workspace Boundary**: All files must be created within the workspace directory
+4. **Allowed Output Roots**: When `outputValidation` is enabled, files may only be written under the resolved source roots — either `outputValidation.allowedRoots` from `pipeline.yml` or auto-detected `**/src/{main,test}/{java,kotlin}` directories
+
+## Rejection Semantics
+
+A file whose path violates the constraints above is **not written to disk**. Instead it is recorded in `GenerationResult.rejectedFiles` with the rejection reason. A parseable response with only rejected files still returns `success=true`; the deterministic `GeneratedOutputVerifier` then reports the failure (`OUTSIDE_SOURCE_ROOT`) and may trigger a bounded corrective retry before the pipeline fails.
 
 ## Multiple Files
 
 The AI can generate multiple files in a single response by including multiple code blocks:
 
 ```
-```kotlin:src/main/kotlin/com/example/User.kt
+```kotlin:app/src/main/java/com/example/User.kt
 package com.example
 
 data class User(val id: Long, val name: String)
 ```
 
-```kotlin:src/main/kotlin/com/example/UserController.kt
+```kotlin:app/src/main/java/com/example/UserRepository.kt
 package com.example
 
-@RestController
-class UserController {
+class UserRepository {
     // implementation
 }
 ```
@@ -70,7 +70,7 @@ class UserController {
 To delete a file, use the `DELETE` marker before the file path:
 
 ```
-DELETE:src/main/kotlin/com/example/OldController.kt
+DELETE:app/src/main/java/com/example/OldScreen.kt
 ```
 
 This will remove the specified file from the workspace if it exists.
@@ -80,10 +80,10 @@ This will remove the specified file from the workspace if it exists.
 To modify an existing file, use the `MODIFY` marker with optional line range:
 
 ```
-MODIFY:src/main/kotlin/com/example/UserController.kt:10-20
+MODIFY:app/src/main/java/com/example/settings/SettingsScreen.kt:10-20
 ```kotlin
 // New content for lines 10-20
-fun newMethod() {
+fun LanguageOption() {
     // implementation
 }
 ```
@@ -92,13 +92,13 @@ fun newMethod() {
 If no line range is specified, the entire file will be replaced:
 
 ```
-MODIFY:src/main/kotlin/com/example/UserController.kt
+MODIFY:app/src/main/java/com/example/settings/SettingsScreen.kt
 ```kotlin
 // Entire new file content
-package com.example
+package com.example.settings
 
-@RestController
-class UserController {
+@Composable
+fun SettingsScreen() {
     // new implementation
 }
 ```
@@ -124,26 +124,7 @@ Please format your response using markdown code blocks with file paths:
 
 ## Implementation Details
 
-The parsing logic is implemented in `OllamaAdapter.kt`:
-
-```kotlin
-private fun parseGeneratedFiles(content: String, workspace: File): List<String> {
-    val codeBlockRegex = Regex("""```(\w+):([^\n]+)\n([\s\S]*?)```""")
-    val matches = codeBlockRegex.findAll(content)
-    
-    for (match in matches) {
-        val filePath = match.groupValues[2]
-        val fileContent = match.groupValues[3]
-        
-        if (isPathSafe(filePath, workspace)) {
-            val file = File(workspace, filePath)
-            file.parentFile?.mkdirs()
-            file.writeText(fileContent)
-            generatedFiles.add(filePath)
-        }
-    }
-}
-```
+The parsing and write-path logic lives in `GeneratedResponseParser` (used by `OllamaAdapter`). It accepts markdown code blocks, `MODIFY:` markers and `DELETE:` markers, and gates every write through workspace-boundary and allowed-roots checks before touching disk.
 
 ## Testing
 
@@ -158,6 +139,8 @@ To test the AI response format:
 ### Files Not Created
 - Check that the response uses the correct format with file paths
 - Verify file paths are relative and don't contain `..`
+- Verify file paths live under an allowed output root (`outputValidation.allowedRoots` or auto-detected source sets)
+- Check the pipeline log for `rejected file` entries with the rejection reason
 - Ensure the workspace directory exists and is writable
 
 ### Parsing Errors
@@ -169,6 +152,4 @@ To test the AI response format:
 
 Potential improvements to the response format:
 
-- Support for file deletion markers
-- Support for file modification instructions
 - Metadata inclusion (e.g., file permissions, encoding)
