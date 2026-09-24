@@ -26,12 +26,14 @@ data class GitConfig(
 data class QualityGateConfig(
     val coverageThreshold: Double = 90.0,
     val coverageType: String = "LINE",
-    val timeoutSeconds: Long = 900L
+    val timeoutSeconds: Long = 900L,
+    val maxBuildRetries: Int = 2
 )
 
 data class BuildConfig(
     val gradleTasks: List<String> = listOf("clean", "build"),
-    val useDaemon: Boolean = false
+    val useDaemon: Boolean = false,
+    val compileTasks: List<String>? = null
 )
 
 data class RetryConfig(
