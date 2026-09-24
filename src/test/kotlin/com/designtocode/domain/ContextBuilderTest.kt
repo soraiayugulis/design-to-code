@@ -131,6 +131,30 @@ class ContextBuilderTest {
     }
 
     @Test
+    fun shouldDetectStackFromModuleBuildFileWhenRootIsEmpty() {
+        // Given — root build file has no plugins (typical multi-module Android layout)
+        val buildFile = File(tempDir, "build.gradle.kts")
+        buildFile.writeText("// Top-level build file")
+        val appDir = File(tempDir, "app")
+        appDir.mkdirs()
+        File(appDir, "build.gradle.kts").writeText(
+            """
+            plugins {
+                id("com.android.application") version "8.5.2"
+            }
+            """.trimIndent()
+        )
+        val contextBuilder = ContextBuilder(buildFile)
+
+        // When
+        val context = contextBuilder.buildContext()
+
+        // Then
+        assertEquals(TechStack.ANDROID, context.techStack)
+        assertEquals("8.5.2", context.frameworkVersion)
+    }
+
+    @Test
     fun shouldHandleUnknownStackGracefully() {
         // Given
         val buildFile = File(tempDir, "build.gradle.kts")

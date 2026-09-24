@@ -8,7 +8,7 @@ import java.io.File
 class ContextBuilder(private val buildFile: File) {
 
     fun buildContext(): ProjectContext {
-        val content = buildFile.readText()
+        val content = collectBuildContent()
         val techStack = detectTechStack(content)
         val database = detectDatabase(content)
         val frameworkVersion = extractFrameworkVersion(content, techStack)
@@ -18,6 +18,15 @@ class ContextBuilder(private val buildFile: File) {
             database = database,
             frameworkVersion = frameworkVersion
         )
+    }
+
+    private fun collectBuildContent(): String {
+        val moduleContents = buildFile.parentFile
+            ?.listFiles { file -> file.isDirectory && file.name !in IGNORED_DIRS }
+            ?.sortedBy { it.name }
+            ?.mapNotNull { File(it, "build.gradle.kts").takeIf(File::exists)?.readText() }
+            ?: emptyList()
+        return (listOf(buildFile.readText()) + moduleContents).joinToString("\n")
     }
 
     private fun detectTechStack(content: String): TechStack {
@@ -66,5 +75,9 @@ class ContextBuilder(private val buildFile: File) {
             .lines()
             .filter { it.isNotBlank() }
             .map { it.trim() }
+    }
+
+    companion object {
+        private val IGNORED_DIRS = setOf("build", "out", ".gradle", ".git", "node_modules")
     }
 }
