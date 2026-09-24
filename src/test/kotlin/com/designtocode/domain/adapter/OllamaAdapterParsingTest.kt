@@ -19,17 +19,8 @@ class OllamaAdapterParsingTest {
     @TempDir
     lateinit var tempDir: File
 
-    private val adapter = OllamaAdapter(host = "localhost", port = 11434, model = "test-model")
-
-    @Suppress("UNCHECKED_CAST")
     private fun parse(content: String, workspace: File): List<String> {
-        val method = OllamaAdapter::class.java.getDeclaredMethod(
-            "parseGeneratedFiles",
-            String::class.java,
-            File::class.java
-        )
-        method.isAccessible = true
-        return method.invoke(adapter, content, workspace) as List<String>
+        return GeneratedResponseParser(workspace, allowedRoots = null).parse(content).written
     }
 
     @Test
