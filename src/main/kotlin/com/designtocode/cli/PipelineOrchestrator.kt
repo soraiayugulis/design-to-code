@@ -7,6 +7,7 @@ import com.designtocode.domain.CoverageType
 import com.designtocode.domain.MetricsCollector
 import com.designtocode.domain.PipelineMetrics
 import com.designtocode.domain.PromptConstructor
+import com.designtocode.domain.PromptGuidance
 import com.designtocode.domain.QualityGateValidator
 import com.designtocode.domain.RetryHelper
 import com.designtocode.domain.SpecChangeAnalyzer
@@ -157,7 +158,9 @@ class PipelineOrchestrator(
         logger.debug("Rules directory: ${rulesDir.absolutePath}")
         
         val promptConstructor = PromptConstructor(rulesDir)
-        val prompt = promptConstructor.constructPrompt(projectContext, changedFiles, File(workspacePath), specChanges)
+        val prompt = promptConstructor.constructPrompt(
+            projectContext, changedFiles, File(workspacePath), PromptGuidance(specChanges = specChanges)
+        )
         logger.info("Prompt constructed with ${changedFiles.size} spec files and ${specChanges.size} detected changes")
         logger.debug("Prompt length: ${prompt.length} characters")
         logger.info("=== Generated Prompt ===\n$prompt\n=== End of Prompt ===")
