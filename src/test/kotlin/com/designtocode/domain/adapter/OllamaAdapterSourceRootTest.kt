@@ -1,7 +1,7 @@
 package com.designtocode.domain.adapter
 
 import com.sun.net.httpserver.HttpServer
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -119,7 +119,7 @@ class OllamaAdapterSourceRootTest {
     }
 
     @Test
-    fun `should succeed with populated rejectedFiles when all files are rejected`() = runTest {
+    fun `should succeed with populated rejectedFiles when all files are rejected`() = runBlocking {
         // Given — D4: parseable response, 100% rejected → success=true with rejections
         responseBody = """{"response":"```kotlin:src/main/kotlin/Misplaced.kt\nclass M\n```","done":true}"""
         val httpAdapter = OllamaAdapter(

@@ -5,6 +5,11 @@ import com.designtocode.domain.port.GenerationResult
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -16,7 +21,8 @@ class OllamaAdapter(
     private val port: Int,
     private val model: String,
     private val timeoutMs: Long = 300000L,
-    private val allowedRoots: List<String>? = null
+    private val allowedRoots: List<String>? = null,
+    private val numCtx: Int? = null
 ) : AIAgentPort {
     companion object {
         private const val CONNECTION_TIMEOUT_MS = 5000
@@ -34,7 +40,9 @@ class OllamaAdapter(
 
         return try {
             withTimeout(timeoutMs) {
+                val startedAt = System.currentTimeMillis()
                 val response = callOllamaAPI(prompt)
+                logger.info("Ollama API call completed in ${System.currentTimeMillis() - startedAt}ms")
                 if (response.success) {
                     logger.info("Ollama API call succeeded")
                     logger.debug("Response content length: ${response.content?.length ?: 0} characters")
@@ -67,10 +75,26 @@ class OllamaAdapter(
         }
     }
 
-    private fun callOllamaAPI(prompt: String): OllamaResponse {
+    private suspend fun callOllamaAPI(prompt: String): OllamaResponse {
         val url = URI.create("http://$host:$port/api/generate").toURL()
         val connection = url.openConnection() as HttpURLConnection
+        // withTimeout only cancels at suspension points; a blocking socket read must be
+        // aborted by disconnecting the connection when the coroutine is cancelled.
+        val cancellationHandle = currentCoroutineContext().job.invokeOnCompletion { cause ->
+            if (cause is CancellationException) connection.disconnect()
+        }
 
+        return try {
+            withContext(Dispatchers.IO) {
+                executeRequest(connection, prompt)
+            }
+        } finally {
+            cancellationHandle.dispose()
+            connection.disconnect()
+        }
+    }
+
+    private fun executeRequest(connection: HttpURLConnection, prompt: String): OllamaResponse {
         return try {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
@@ -82,6 +106,9 @@ class OllamaAdapter(
                 addProperty("model", model)
                 addProperty("prompt", prompt)
                 addProperty("stream", false)
+                numCtx?.let {
+                    add("options", JsonObject().apply { addProperty("num_ctx", it) })
+                }
             })
 
             connection.outputStream.use { it.write(requestBody.toByteArray()) }
@@ -98,10 +125,10 @@ class OllamaAdapter(
             } else {
                 OllamaResponse(success = false, content = null, error = "HTTP $responseCode: $responseBody")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             OllamaResponse(success = false, content = null, error = e.message)
-        } finally {
-            connection.disconnect()
         }
     }
 
