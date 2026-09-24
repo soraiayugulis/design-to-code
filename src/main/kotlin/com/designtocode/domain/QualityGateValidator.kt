@@ -1,5 +1,6 @@
 package com.designtocode.domain
 
+import com.designtocode.domain.model.QualityFailureCategory
 import com.designtocode.domain.model.QualityGateResult
 import com.designtocode.domain.port.QualityGatePort
 import org.slf4j.LoggerFactory
@@ -16,7 +17,8 @@ class QualityGateValidator(
     private val coverageThreshold: Double = 90.0,
     private val timeoutSeconds: Long = 900L, // 15 minutes default
     private val coverageType: CoverageType = CoverageType.LINE,
-    private val gradleTasks: List<String> = listOf("clean", "build")
+    private val gradleTasks: List<String> = listOf("clean", "build"),
+    private val compileTasks: List<String> = emptyList()
 ) : QualityGatePort {
     private val logger = LoggerFactory.getLogger(QualityGateValidator::class.java)
 
@@ -26,7 +28,9 @@ class QualityGateValidator(
         logger.info("Coverage threshold: $coverageThreshold%, type: $coverageType")
         logger.info("Timeout: ${timeoutSeconds}s")
         
-        val buildResult = executeGradleBuild()
+        validateCompilation()?.let { return it }
+
+        val buildResult = executeGradleBuild(gradleTasks)
         
         if (!buildResult.success) {
             logger.error("Gradle build failed: ${buildResult.errorMessage}")
@@ -34,7 +38,8 @@ class QualityGateValidator(
                 passed = false,
                 buildSuccess = false,
                 coveragePercentage = 0.0,
-                errorMessage = buildResult.errorMessage
+                errorMessage = buildResult.errorMessage,
+                failureCategory = buildResult.category
             )
         }
         logger.info("Gradle build succeeded")
@@ -49,7 +54,8 @@ class QualityGateValidator(
                 buildSuccess = true,
                 coveragePercentage = 0.0,
                 lintIssues = detektResult.issueCount,
-                errorMessage = detektResult.errorMessage
+                errorMessage = detektResult.errorMessage,
+                failureCategory = QualityFailureCategory.LINT
             )
         }
         logger.info("Detekt passed with ${detektResult.issueCount} issues")
@@ -72,15 +78,23 @@ class QualityGateValidator(
             buildSuccess = true,
             coveragePercentage = coveragePercentage,
             lintIssues = detektResult.issueCount,
-            errorMessage = if (!passed) "Coverage $coveragePercentage% is below threshold $coverageThreshold%" else null
+            errorMessage = if (!passed) "Coverage $coveragePercentage% is below threshold $coverageThreshold%" else null,
+            failureCategory = if (!passed) QualityFailureCategory.COVERAGE else null
         )
     }
     
-    private fun runProcess(command: List<String>): ProcessOutput {
-        return ProcessRunner(projectDir).run(command, timeoutSeconds)
+    private fun validateCompilation(): QualityGateResult? {
+        if (compileTasks.isEmpty()) return null
+        val result = executeGradleBuild(compileTasks)
+        if (result.success) return null
+        logger.error("Compile check failed: ${result.errorMessage}")
+        return QualityGateResult(
+            passed = false, buildSuccess = false, coveragePercentage = 0.0,
+            errorMessage = result.errorMessage, failureCategory = result.category
+        )
     }
 
-    private fun executeGradleBuild(): BuildResult {
+    private fun executeGradleBuild(tasks: List<String>): BuildResult {
         logger.debug("Executing Gradle build")
         return try {
             val gradleWrapper = File(projectDir, "gradlew")
@@ -92,11 +106,11 @@ class QualityGateValidator(
             }
 
             logger.debug("Starting Gradle build with timeout: ${timeoutSeconds}s")
-            val result = runProcess(listOf(gradleWrapper.absolutePath) + gradleTasks + "--no-daemon")
+            val result = ProcessRunner(projectDir).run(listOf(gradleWrapper.absolutePath) + tasks + "--no-daemon", timeoutSeconds)
 
             if (result.timedOut) {
                 logger.error("Gradle build timed out after ${timeoutSeconds}s")
-                return BuildResult(false, "Gradle build timed out after ${timeoutSeconds}s")
+                return BuildResult(false, "Gradle build timed out after ${timeoutSeconds}s", QualityFailureCategory.TIMEOUT)
             }
 
             logger.debug("Gradle build exit code: ${result.exitCode}")
@@ -107,7 +121,14 @@ class QualityGateValidator(
             } else {
                 val errorMessage = extractCompilationErrors(result.output)
                 logger.error("Gradle build failed with exit code ${result.exitCode}: $errorMessage")
-                BuildResult(false, "Gradle build failed with exit code ${result.exitCode}. $errorMessage")
+                val category = when {
+                    Regex("> Task :\\S*test\\S* FAILED", RegexOption.IGNORE_CASE).containsMatchIn(result.output) ->
+                        QualityFailureCategory.TEST
+                    result.output.lines().any { it.trim().startsWith("e: ") || it.contains("error:") } ->
+                        QualityFailureCategory.COMPILATION
+                    else -> QualityFailureCategory.UNKNOWN
+                }
+                BuildResult(false, "Gradle build failed with exit code ${result.exitCode}. $errorMessage", category)
             }
         } catch (e: Exception) {
             logger.error("Failed to execute Gradle build: ${e.message}", e)
@@ -117,20 +138,18 @@ class QualityGateValidator(
 
     companion object {
         private const val PERCENTAGE_MULTIPLIER = 100.0
-        private const val MAX_ERROR_LINES = 3
+        private const val MAX_ERROR_LINES = 10
     }
 
     private fun extractCompilationErrors(errorOutput: String): String {
-        if (errorOutput.contains("error:") || errorOutput.contains("FAILURE")) {
-            val lines = errorOutput.lines()
-            val errorLines = lines.filter { it.contains("error:") || it.contains("e:") }
-            return if (errorLines.isNotEmpty()) {
-                errorLines.take(MAX_ERROR_LINES).joinToString("; ")
-            } else {
-                "Build compilation failed"
-            }
+        val lines = errorOutput.lines().map { it.trim() }
+        val kotlinErrors = lines.filter { it.startsWith("e: ") || it.startsWith("e: file:") }
+        val javaErrors = lines.filter { it.contains("error:") }
+        val diagnostics = (kotlinErrors.ifEmpty { javaErrors }).distinct().take(MAX_ERROR_LINES)
+        return diagnostics.joinToString("; ").ifEmpty {
+            lines.firstOrNull { it.contains("not found", ignoreCase = true) }
+                ?: if (errorOutput.contains("FAILURE")) "Build failed; consult Gradle output for details" else "Build failed"
         }
-        return "Build failed"
     }
     
     private fun executeDetekt(): DetektResult {
@@ -145,7 +164,7 @@ class QualityGateValidator(
             }
 
             logger.debug("Starting Detekt with timeout: ${timeoutSeconds}s")
-            val result = runProcess(listOf(gradleWrapper.absolutePath, "detekt", "--no-daemon"))
+            val result = ProcessRunner(projectDir).run(listOf(gradleWrapper.absolutePath, "detekt", "--no-daemon"), timeoutSeconds)
 
             if (result.timedOut) {
                 logger.error("Detekt timed out after ${timeoutSeconds}s")
@@ -174,7 +193,7 @@ class QualityGateValidator(
             val gradleWrapper = File(projectDir, "gradlew")
             if (!gradleWrapper.exists()) return
 
-            val result = runProcess(listOf(gradleWrapper.absolutePath, "koverXmlReport", "--no-daemon"))
+            val result = ProcessRunner(projectDir).run(listOf(gradleWrapper.absolutePath, "koverXmlReport", "--no-daemon"), timeoutSeconds)
             if (result.exitCode != 0) {
                 logger.debug("koverXmlReport not available or failed (exit ${result.exitCode}), falling back to existing reports")
             }
@@ -279,7 +298,8 @@ class QualityGateValidator(
     
     private data class BuildResult(
         val success: Boolean,
-        val errorMessage: String?
+        val errorMessage: String?,
+        val category: QualityFailureCategory = QualityFailureCategory.UNKNOWN
     )
     
     private data class DetektResult(

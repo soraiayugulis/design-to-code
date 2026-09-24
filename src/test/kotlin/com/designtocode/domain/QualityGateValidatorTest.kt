@@ -1,5 +1,7 @@
 package com.designtocode.domain
 
+import com.designtocode.config.ConfigLoader
+import com.designtocode.domain.model.QualityFailureCategory
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -108,6 +110,111 @@ class QualityGateValidatorTest {
         // Then
         assertFalse(result.buildSuccess, "Build should fail")
         assertTrue(result.errorMessage != null, "Error message should be present")
+    }
+
+    @Test
+    fun shouldPreferKotlinDiagnosticOverKaptStubError() {
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText(
+            "#!/bin/bash\n" +
+                "echo 'e: file:///app/src/main/java/SettingsScreen.kt:12:5 Unresolved reference: MissingAnnotation'\n" +
+                "echo '/app/build/tmp/kapt3/stubs/debug/SettingsScreenKt.java:6: error: incompatible types: NonExistentClass cannot be converted to Annotation'\n" +
+                "exit 1\n"
+        )
+        gradlew.setExecutable(true)
+
+        val result = QualityGateValidator(tempDir).validate()
+
+        assertFalse(result.buildSuccess)
+        assertTrue(result.errorMessage?.contains("Unresolved reference: MissingAnnotation") == true)
+        assertFalse(result.errorMessage?.contains("NonExistentClass") == true)
+        assertEquals(QualityFailureCategory.COMPILATION, result.failureCategory)
+    }
+
+    @Test
+    fun shouldParseExplicitCompileTasksAndAllowDisablingThem() {
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("build:\n  compileTasks: [':app:kaptDebugKotlin', ':app:compileDebugKotlin']\n")
+        assertEquals(
+            listOf(":app:kaptDebugKotlin", ":app:compileDebugKotlin"),
+            ConfigLoader().loadConfig(configFile).build.compileTasks
+        )
+        configFile.writeText("build:\n  compileTasks: []\n")
+        assertEquals(emptyList(), ConfigLoader().loadConfig(configFile).build.compileTasks)
+        configFile.writeText("build: {}\n")
+        assertEquals(null, ConfigLoader().loadConfig(configFile).build.compileTasks)
+    }
+
+    @Test
+    fun shouldParseBoundedBuildRetries() {
+        val configFile = File(tempDir, "pipeline.yml")
+        configFile.writeText("qualityGate:\n  maxBuildRetries: 1\n")
+        assertEquals(1, ConfigLoader().loadConfig(configFile).qualityGate.maxBuildRetries)
+        configFile.writeText("qualityGate: {}\n")
+        assertEquals(2, ConfigLoader().loadConfig(configFile).qualityGate.maxBuildRetries)
+        configFile.writeText("qualityGate:\n  maxBuildRetries: -1\n")
+        kotlin.test.assertFailsWith<com.designtocode.config.ConfigException> { ConfigLoader().loadConfig(configFile) }
+        configFile.writeText("qualityGate:\n  maxBuildRetries: 4294967296\n")
+        kotlin.test.assertFailsWith<com.designtocode.config.ConfigException> { ConfigLoader().loadConfig(configFile) }
+    }
+
+    @Test
+    fun shouldStopBeforeFullBuildWhenCompileCheckFails() {
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText(
+            "#!/bin/bash\n" +
+                "echo \"\$1\" >> tasks.log\n" +
+                "if [ \"\$1\" = 'compileDebugKotlin' ]; then\n" +
+                "  echo 'e: file:///app/src/main/java/SettingsScreen.kt:12:5 Unresolved reference: MissingAnnotation'\n" +
+                "  exit 1\n" +
+                "fi\nexit 0\n"
+        )
+        gradlew.setExecutable(true)
+
+        val result = QualityGateValidator(tempDir, compileTasks = listOf("compileDebugKotlin")).validate()
+
+        assertFalse(result.passed)
+        assertFalse(result.buildSuccess)
+        assertTrue(result.errorMessage?.contains("MissingAnnotation") == true)
+        assertEquals(listOf("compileDebugKotlin"), File(tempDir, "tasks.log").readLines())
+        assertEquals(QualityFailureCategory.COMPILATION, result.failureCategory)
+    }
+
+    @Test
+    fun shouldNotRetryAnInvalidCompileTaskAsSourceCompilation() {
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText("#!/bin/bash\necho \"Task 'compileDebugKotlin' not found in root project\"\nexit 1\n")
+        gradlew.setExecutable(true)
+
+        val result = QualityGateValidator(tempDir, compileTasks = listOf("compileDebugKotlin")).validate()
+
+        assertEquals(QualityFailureCategory.UNKNOWN, result.failureCategory)
+        assertTrue(result.errorMessage?.contains("not found") == true)
+    }
+
+    @Test
+    fun shouldClassifyTestTaskFailureBeforeGenericErrorText() {
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText(
+            "#!/bin/bash\necho '> Task :app:testDebugUnitTest FAILED'\n" +
+                "echo 'error: assertion expected true but was false'\nexit 1\n"
+        )
+        gradlew.setExecutable(true)
+
+        val result = QualityGateValidator(tempDir).validate()
+
+        assertEquals(QualityFailureCategory.TEST, result.failureCategory)
+    }
+
+    @Test
+    fun shouldRunFullBuildAfterCompileCheckPasses() {
+        val gradlew = File(tempDir, "gradlew")
+        gradlew.writeText("#!/bin/bash\necho \"\$1\" >> tasks.log\nexit 0\n")
+        gradlew.setExecutable(true)
+
+        QualityGateValidator(tempDir, coverageThreshold = 0.0, compileTasks = listOf("compileDebugKotlin")).validate()
+
+        assertEquals(listOf("compileDebugKotlin", "clean", "detekt", "koverXmlReport"), File(tempDir, "tasks.log").readLines())
     }
 
     @Test
@@ -256,6 +363,7 @@ class QualityGateValidatorTest {
         assertFalse(result.passed, "Quality gate should fail when Detekt finds issues")
         assertEquals(5, result.lintIssues, "Should parse the issue count from Detekt output")
         assertTrue(result.errorMessage?.contains("Detekt") == true, "Error should mention Detekt")
+        assertEquals(QualityFailureCategory.LINT, result.failureCategory)
     }
 
     @Test
