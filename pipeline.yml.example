@@ -30,3 +30,17 @@ retry:
   initialDelayMs: 1000
   maxDelayMs: 10000
   backoffMultiplier: 2.0
+
+outputValidation:
+  # When true, generated files must land inside allowedRoots and spec-declared
+  # target files must be modified; violations trigger bounded corrective retries.
+  enabled: true
+  # When true, files written outside the spec's declared targets also fail the run.
+  strictMode: false
+  maxCorrectiveRetries: 2
+  # Workspace-relative roots that generated files may be written under.
+  # When omitted or empty, roots are auto-detected from existing
+  # **/src/{main,test}/{java,kotlin} directories.
+  allowedRoots:
+    - app/src/main/java
+    - app/src/test/java
