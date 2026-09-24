@@ -8,6 +8,8 @@ import com.designtocode.domain.model.ViolationType
 import com.designtocode.domain.port.GenerationResult
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 class GeneratedOutputVerifier(
     private val workspace: File,
@@ -83,5 +85,66 @@ class GeneratedOutputVerifier(
     companion object {
         private const val STATUS_TIMEOUT_SECONDS = 30L
         private const val PORCELAIN_PATH_OFFSET = 3
+    }
+}
+
+class GeneratedWorkspaceRun(workspace: File, configuredRoots: List<String>, resolvedRoots: List<String>?) {
+    private val snapshot = WorkspaceSnapshot(
+        workspace, resolvedRoots ?: SourceRootValidator(workspace, configuredRoots).resolvedRoots
+    )
+    private val written = mutableSetOf<String>()
+    private var rollbackAllowed = true
+    private var completed = false
+    val writtenFiles: Set<String> get() = written.toSet()
+
+    fun record(paths: Collection<String>) { written.addAll(paths) }
+    fun restoreGenerated() { snapshot.restore(written) }
+    fun preserveForGit() { rollbackAllowed = false }
+    fun complete() { completed = true }
+    fun rollbackIfNeeded() {
+        if (!completed && rollbackAllowed) snapshot.restore(written)
+    }
+}
+
+class WorkspaceSnapshot(private val workspace: File, roots: List<String>) {
+    private val validator = SourceRootValidator(workspace, roots)
+    private val workspacePath = workspace.canonicalFile.toPath()
+    private val files: Map<String, ByteArray> = roots.flatMap { root ->
+        val source = File(workspace, root).toPath()
+        if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) emptyList() else Files.walk(source).use { stream ->
+            stream.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }
+                .filter { path ->
+                    val relative = workspacePath.relativize(path.toFile().canonicalFile.toPath())
+                    relative.none { it.toString() in EXCLUDED_DIRS } && validator.isAllowed(relative.toString())
+                }
+                .map { workspacePath.relativize(it.toFile().canonicalFile.toPath()).toString() to Files.readAllBytes(it) }
+                .toList()
+        }
+    }.toMap()
+
+    fun restore(paths: Set<String>) {
+        paths.mapNotNull { path -> runCatching { restorePath(path) }.exceptionOrNull() }
+            .firstOrNull()?.let { throw it }
+    }
+
+    private fun restorePath(path: String) {
+        require(validator.isAllowed(path) && path.replace('\\', '/').split('/').none { it in EXCLUDED_DIRS }) {
+            "Unsafe rollback path: $path"
+        }
+        val file = File(workspace, path)
+        val canonical = file.canonicalFile.toPath()
+        require(!Files.isSymbolicLink(file.toPath()) && canonical.startsWith(workspacePath) &&
+            validator.isAllowed(workspacePath.relativize(canonical).toString())) { "Unsafe rollback path: $path" }
+        val content = files[workspacePath.relativize(canonical).toString()]
+        if (content == null) {
+            if (file.isFile) check(file.delete()) { "Failed to remove generated file: $path" }
+        } else {
+            file.parentFile?.mkdirs()
+            file.writeBytes(content)
+        }
+    }
+
+    private companion object {
+        val EXCLUDED_DIRS = setOf(".git", ".gradle", "build", "out", "node_modules")
     }
 }

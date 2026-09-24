@@ -1,6 +1,8 @@
 package com.designtocode.domain
 
 import com.designtocode.domain.model.OutputVerificationResult
+import com.designtocode.domain.model.QualityFailureCategory
+import com.designtocode.domain.model.QualityGateResult
 import com.designtocode.domain.model.SpecTarget
 import com.designtocode.domain.model.ViolationType
 import com.designtocode.domain.port.GenerationResult
@@ -94,4 +96,40 @@ data class CorrectiveResult(
     val generation: GenerationResult,
     val verification: OutputVerificationResult,
     val attempts: List<OutputVerificationResult>
+)
+
+class BuildFailureRetryOrchestrator(
+    private val maxRetries: Int,
+    private val generate: suspend (String) -> GenerationResult,
+    private val verify: suspend (GenerationResult) -> Boolean,
+    private val validate: () -> QualityGateResult,
+    private val prepareAttempt: () -> Unit = {}
+) {
+    suspend fun correct(prompt: String, initial: QualityGateResult): BuildRetryResult {
+        var result = initial
+        var attempts = 0
+        while (attempts < maxRetries && !result.passed && result.failureCategory == QualityFailureCategory.COMPILATION) {
+            val diagnostic = result.errorMessage ?: "Compilation failed"
+            prepareAttempt()
+            val generation = generate(
+                "$prompt\n## Corrective Feedback — Compilation Failure\n$diagnostic\n" +
+                    "Fix the compilation errors in the declared target only. Regenerate the complete corrected file."
+            )
+            attempts++
+            if (!generation.success) return BuildRetryResult(result, attempts, "Corrective generation failed: ${generation.errorMessage}")
+            if (!verify(generation)) return BuildRetryResult(result, attempts, "Output verification failed after compile correction")
+            val next = validate()
+            if (!next.passed && next.failureCategory == QualityFailureCategory.COMPILATION && next.errorMessage == result.errorMessage) {
+                return BuildRetryResult(next, attempts)
+            }
+            result = next
+        }
+        return BuildRetryResult(result, attempts)
+    }
+}
+
+data class BuildRetryResult(
+    val quality: QualityGateResult,
+    val attempts: Int,
+    val errorMessage: String? = null
 )

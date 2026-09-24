@@ -35,14 +35,12 @@ class ConfigLoader {
     }
 
     private fun parseConfigMap(configMap: Map<String, Any>): PipelineConfig {
-        val aiConfig = parseAIConfig(configMap["ai"] as? Map<String, Any> ?: emptyMap())
-        val gitConfig = parseGitConfig(configMap["git"] as? Map<String, Any> ?: emptyMap())
-        val qualityGateConfig = parseQualityGateConfig(configMap["qualityGate"] as? Map<String, Any> ?: emptyMap())
-        val buildConfig = parseBuildConfig(configMap["build"] as? Map<String, Any> ?: emptyMap())
-        val retryConfig = parseRetryConfig(configMap["retry"] as? Map<String, Any> ?: emptyMap())
-        val outputValidationConfig = parseOutputValidationConfig(
-            configMap["outputValidation"] as? Map<String, Any> ?: emptyMap()
-        )
+        val aiConfig = parseAIConfig(configMap["ai"].asStringMap())
+        val gitConfig = parseGitConfig(configMap["git"].asStringMap())
+        val qualityGateConfig = parseQualityGateConfig(configMap["qualityGate"].asStringMap())
+        val buildConfig = parseBuildConfig(configMap["build"].asStringMap())
+        val retryConfig = parseRetryConfig(configMap["retry"].asStringMap())
+        val outputValidationConfig = parseOutputValidationConfig(configMap["outputValidation"].asStringMap())
 
         return PipelineConfig(
             ai = aiConfig,
@@ -80,22 +78,34 @@ class ConfigLoader {
             throw ConfigException("Coverage threshold must be between $MIN_COVERAGE_THRESHOLD and $MAX_COVERAGE_THRESHOLD")
         }
 
+        val maxBuildRetries = when (val retries = qualityGateMap["maxBuildRetries"]) {
+            null -> 2
+            is Int -> retries
+            is Long -> retries.takeIf { it in 0..Int.MAX_VALUE.toLong() }?.toInt()
+            else -> null
+        }
+        if (maxBuildRetries == null || maxBuildRetries < 0) {
+            throw ConfigException("Build retries must be a non-negative integer")
+        }
         return QualityGateConfig(
             coverageThreshold = coverageThreshold,
             coverageType = qualityGateMap["coverageType"] as? String ?: "LINE",
-            timeoutSeconds = (qualityGateMap["timeoutSeconds"] as? Int)?.toLong() ?: qualityGateMap["timeoutSeconds"] as? Long ?: 900L
+            timeoutSeconds = (qualityGateMap["timeoutSeconds"] as? Int)?.toLong() ?: qualityGateMap["timeoutSeconds"] as? Long ?: 900L,
+            maxBuildRetries = maxBuildRetries
         )
     }
 
     private fun parseBuildConfig(buildMap: Map<String, Any>): BuildConfig {
-        val gradleTasks = buildMap["gradleTasks"] as? List<String> ?: listOf("clean", "build")
+        val gradleTasks = (buildMap["gradleTasks"] as? List<*>)?.filterIsInstance<String>()
+            ?: listOf("clean", "build")
         if (gradleTasks.isEmpty()) {
             throw ConfigException("Gradle tasks cannot be empty")
         }
 
         return BuildConfig(
             gradleTasks = gradleTasks,
-            useDaemon = buildMap["useDaemon"] as? Boolean ?: false
+            useDaemon = buildMap["useDaemon"] as? Boolean ?: false,
+            compileTasks = (buildMap["compileTasks"] as? List<*>)?.filterIsInstance<String>()
         )
     }
 
@@ -118,6 +128,12 @@ class ConfigLoader {
             backoffMultiplier = (retryMap["backoffMultiplier"] as? Int)?.toDouble() ?: retryMap["backoffMultiplier"] as? Double ?: 2.0
         )
     }
+
+    private fun Any?.asStringMap(): Map<String, Any> =
+        (this as? Map<*, *>)
+            ?.mapNotNull { (key, value) -> if (key is String && value != null) key to value else null }
+            ?.toMap()
+            .orEmpty()
 }
 
 class ConfigException(message: String, cause: Throwable? = null) : Exception(message, cause)

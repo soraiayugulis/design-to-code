@@ -25,6 +25,7 @@ qualityGate:
   coverageThreshold: 90.0
   coverageType: LINE
   timeoutSeconds: 900
+  maxBuildRetries: 2
 
 build:
   gradleTasks:
